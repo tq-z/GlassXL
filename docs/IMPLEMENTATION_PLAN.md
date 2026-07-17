@@ -32,13 +32,13 @@ Agentic Workload Generator
     ↓ creates Agent / Invocation events
 
 Agentic Runtime
-    ↓ creates generic ComputeTask / MemoryTask / TransferTask
+    ↓ creates phase-aware ComputeTask / MemoryTask / TransferTask
 
 Discrete-Event Engine
     ↓ executes tasks on abstract hardware resources
 
 Simple Hardware Backend
-    - compute service rate + fixed latency
+    - prefill/decode token rates + fixed latency
     - memory bandwidth + fixed latency
     - link bandwidth + fixed latency
 
@@ -101,7 +101,8 @@ The first implementation uses only:
 - `TransferTask`
 - `WaitTask`
 
-Specialized xPU, NMP, KV, and MoE tasks are added later.
+Coarse KV retention uses only these generic tasks. Specialized xPU, NMP, KV,
+and MoE tasks are added later.
 
 ## 2.4 First version uses a reference policy, not a research scheduler
 
@@ -198,7 +199,8 @@ Do not implement:
 - detailed xPU/NMP models;
 - MoE;
 - dynamic batching optimization;
-- KV migration;
+- optimized KV migration, placement, or eviction beyond the configured coarse
+  retention mode;
 - passive optical reservation;
 - ASTRA-Sim.
 
@@ -259,21 +261,21 @@ class Task:
 Examples:
 
 ```python
+class ComputePhase(Enum):
+    PREFILL = "prefill"
+    DECODE = "decode"
+
 # Compute metadata
-{
-    "work_units": 1.0,
-    "device_class": "compute"
-}
+{"phase": ComputePhase.PREFILL, "tokens": 1024}
 ```
 
 ```python
-# Transfer metadata
-{
-    "bytes": 1048576,
-    "src": 0,
-    "dst": 1
-}
+# Logical KV transfer metadata; placement selects physical endpoints.
+{"bytes": 1048576, "direction": "prefill_to_decode"}
 ```
+
+Memory operations use `operation: read|write`. Transfer directions are
+`prefill_to_decode`, `store`, and `restore`; all remain generic tasks.
 
 ## 4.3 Generic hardware abstraction
 
@@ -284,16 +286,21 @@ Examples:
 class Device:
     device_id: int
     device_class: str
-    service_rate: float
+    prefill_tokens_per_second: float
+    decode_tokens_per_second: float
     fixed_latency: float
     queue_policy: str = "fcfs"
 ```
 
-Initial compute service time:
+Initial phase service times:
 
 ```text
-T_compute = fixed_latency + work_units / service_rate
+T_prefill = fixed_latency + prefill_tokens / prefill_tokens_per_second
+T_decode  = fixed_latency + output_tokens / decode_tokens_per_second
 ```
+
+Both rates are present on every generic compute unit even when the reference
+policy assigns it only one phase.
 
 ### Memory resource
 
@@ -340,19 +347,32 @@ hardware:
   devices:
     - id: 0
       class: compute
-      service_rate: 1.0e12
+      prefill_tokens_per_second: 18000
+      decode_tokens_per_second: 2500
       fixed_latency_us: 5
-
     - id: 1
-      class: memory
-      service_rate: 1.0e12
+      class: compute
+      prefill_tokens_per_second: 12000
+      decode_tokens_per_second: 3000
       fixed_latency_us: 5
-
+  memories:
+    - id: 2
+      capacity_bytes: 17179869184
+      bandwidth_bytes_per_sec: 1.0e10
+      fixed_latency_us: 10
   links:
     - src: 0
       dst: 1
-      bandwidth_gbps: 400
-      fixed_latency_us: 1
+      bandwidth_gbps: 100
+      fixed_latency_us: 2
+    - src: 1
+      dst: 2
+      bandwidth_gbps: 100
+      fixed_latency_us: 2
+    - src: 2
+      dst: 0
+      bandwidth_gbps: 100
+      fixed_latency_us: 2
 ```
 
 Initially support:
@@ -370,6 +390,7 @@ class AgentState(Enum):
     READY = auto()
     RUNNING = auto()
     TOOL_WAIT = auto()
+    KV_WAIT = auto()
     FINISHED = auto()
 ```
 
@@ -396,23 +417,26 @@ State progression:
 
 ```text
 arrival
-→ invocation
-→ optional tool wait
+→ prefill / KV restore
+→ decode
+→ fork tool wait and optional KV store
+→ join both branches
 → next invocation
 → ...
 → finish
 ```
 
-The first version does not need token-by-token prefill/decode execution.
-
-Each invocation can be represented as a small generic task graph:
+The core P-D invocation graph is:
 
 ```text
-compute
-→ transfer
-→ compute
-→ optional tool wait
+prefill compute
+→ prompt-KV transfer from prefill to decode
+→ decode compute
 ```
+
+For retained later turns, memory read and restore transfer precede prefill.
+Discarded later turns instead recompute the accumulated context. The first
+version models each phase as one lumped task, not token-by-token execution.
 
 ## 4.6 Workload distributions
 
@@ -472,37 +496,30 @@ workload:
 
 All random draws must be reproducible using a configured seed.
 
-## 4.7 Invocation cost model
+## 4.7 Invocation and KV cost model
 
 Avoid detailed Transformer modeling in Phase 1.
 
-Map invocation properties to abstract work:
+Let `prior_context` contain all tokens completed before the current turn:
 
 ```text
-compute_work =
-    a0
-  + a1 × input_tokens
-  + a2 × output_tokens
-  + a3 × (context_tokens+input_tokens) × output_tokens
+prefill_tokens (retained or first turn) = input_tokens
+prefill_tokens (discarded KV) = prior_context + input_tokens
+decode_tokens = output_tokens
+P→D_bytes = (prior_context + input_tokens) × kv_bytes_per_token
+stored_bytes = (prior_context + input_tokens + output_tokens) × kv_bytes_per_token
+restore_bytes = prior_context × kv_bytes_per_token
 ```
 
-```text
-transfer_bytes =
-    b0
-  + b1 × input_tokens
-  + b2 × output_tokens
-  + b3 × context_tokens
-```
+The global retention mode is:
 
-The coefficients are configurable.
+- `memory`: store and restore through the configured memory resource;
+- `far_memory`: use a separately configured, typically slower memory resource;
+- `discard`: store nothing and recompute prior context next turn.
 
-The purpose is not hardware accuracy. The purpose is to create workload pressure that changes with:
-
-- input length;
-- output length;
-- context growth;
-- number of turns;
-- tool-wait behavior.
+For retained non-final turns, tool wait and background KV storage start together.
+The next invocation waits for both branches. Memory capacity is descriptive;
+aggregate allocation and eviction are not modeled in Phase 1.
 
 ## 4.8 Reference execution policy
 
@@ -510,8 +527,10 @@ Implement one replaceable policy:
 
 ```text
 FCFS
-+ static device assignment
-+ no migration
++ static prefill and decode device assignment
++ configured memory/far-memory selection
++ fixed logical-transfer to direct-link mapping
++ no dynamic migration or placement
 + no batching optimization
 ```
 
@@ -557,7 +576,8 @@ System-level:
 - average latency;
 - p50/p95/p99 latency;
 - average number of active agents;
-- average number of waiting agents;
+- average number of tool-wait agents;
+- average number of KV-wait agents;
 - offered load vs. completed load.
 
 ## 4.10 Phase 1 experiments
@@ -587,7 +607,11 @@ Phase 1 is complete when:
 - agents execute multiple turns;
 - tool waits suspend and resume agents;
 - context length grows across turns;
-- abstract compute and transfer tasks execute on hardware resources;
+- prefill and decode use separate statically assigned generic devices;
+- compute service uses phase-specific token rates;
+- memory, far-memory, and discard KV retention modes run end-to-end;
+- retained KV storage overlaps tool waits and joins before the next turn;
+- abstract compute, memory, and transfer tasks execute on hardware resources;
 - queueing emerges naturally;
 - latency and utilization metrics are exported;
 - an arrival-rate sweep produces a saturation curve;
@@ -979,9 +1003,14 @@ No hardware specialization yet.
 
 Implement:
 
-- generic compute devices;
-- generic memory devices;
+- generic compute devices with prefill/decode token rates;
+- separate statically mapped prefill and decode devices;
+- generic memory and far-memory resources;
 - latency + bandwidth links;
+- memory, far-memory, and discard KV retention;
+- prompt-KV transfer, restore, and background store graphs;
+- overlapping tool-wait/KV-store fork and join;
+- `KV_WAIT` agent state;
 - FCFS queues;
 - static placement;
 - end-to-end execution;
@@ -1077,24 +1106,44 @@ hardware:
   devices:
     - id: 0
       class: compute
-      service_rate: 1.0e12
+      prefill_tokens_per_second: 18000
+      decode_tokens_per_second: 2500
       fixed_latency_us: 5
-
     - id: 1
-      class: memory
-      service_rate: 5.0e11
+      class: compute
+      prefill_tokens_per_second: 12000
+      decode_tokens_per_second: 3000
+      fixed_latency_us: 5
+  memories:
+    - id: 2
+      capacity_bytes: 17179869184
+      bandwidth_bytes_per_sec: 1.0e10
       fixed_latency_us: 10
-
+    - id: 3
+      capacity_bytes: 137438953472
+      bandwidth_bytes_per_sec: 2.0e9
+      fixed_latency_us: 100
   links:
     - src: 0
       dst: 1
-      bandwidth_gbps: 400
-      fixed_latency_us: 1
-
+      bandwidth_gbps: 100
+      fixed_latency_us: 2
     - src: 1
+      dst: 2
+      bandwidth_gbps: 100
+      fixed_latency_us: 2
+    - src: 2
       dst: 0
-      bandwidth_gbps: 400
-      fixed_latency_us: 1
+      bandwidth_gbps: 100
+      fixed_latency_us: 2
+    - src: 1
+      dst: 3
+      bandwidth_gbps: 25
+      fixed_latency_us: 20
+    - src: 3
+      dst: 0
+      bandwidth_gbps: 25
+      fixed_latency_us: 20
 
 workload:
   num_agents: 10000
@@ -1130,22 +1179,16 @@ workload:
     max: 30000
 
 invocation_model:
-  compute:
-    base_work: 1.0e9
-    per_input_token: 2.0e7
-    per_output_token: 4.0e7
-    context_output_term: 2.0e4
-
-  transfer:
-    base_bytes: 4096
-    per_input_token: 2048
-    per_output_token: 4096
-    per_context_token: 1024
+  kv:
+    bytes_per_token: 8192
+    retention: memory
 
 policy:
   type: static_fcfs
-  compute_device: 0
-  memory_device: 1
+  prefill_device: 0
+  decode_device: 1
+  memory_resource: 2
+  far_memory_resource: 3
 ```
 
 ---
@@ -1180,7 +1223,8 @@ Minimum summary:
   "memory_utilization": 0.0,
   "link_utilization": 0.0,
   "max_compute_queue": 0,
-  "max_memory_queue": 0
+  "max_memory_queue": 0,
+  "average_kv_wait_agents": 0.0
 }
 ```
 
@@ -1200,7 +1244,11 @@ Deliver:
 - multi-turn agents;
 - tool waits;
 - context growth;
-- simple compute/memory/link hardware;
+- phase-aware prefill/decode compute hardware;
+- generic memory and far-memory resources;
+- configurable memory/far-memory/discard KV retention;
+- overlapping tool-wait and KV-store fork/join;
+- simple latency/bandwidth links;
 - static FCFS placement;
 - end-to-end simulation;
 - basic metrics;
@@ -1212,7 +1260,8 @@ Do not implement yet:
 - xPU-specific equations;
 - NMP-specific equations;
 - MoE;
-- KV migration;
+- optimized KV migration, placement, eviction, or capacity management beyond
+  the coarse configured retention mode;
 - advanced scheduling;
 - passive optical resource reservation;
 - wavelength allocation;
@@ -1234,6 +1283,8 @@ while also capturing:
 multi-turn agents
 + tool waits
 + context growth
++ coarse P-D decoupling
++ configurable KV retention
 ```
 
 All later architecture features must plug into this framework without changing the event engine or workload interfaces.
