@@ -8,6 +8,17 @@ from agentic_sim.runtime.attention_admission import (
     CapacityWaiter,
     PoolWriteCompletion,
 )
+from agentic_sim.runtime.decode_batcher import (
+    DecodeBatch,
+    DecodeBatcher,
+    LocalAttentionBatch,
+)
+from agentic_sim.runtime.decode_controller import (
+    CompletedPoolWrite,
+    DecodeController,
+    DecodeStepResult,
+    PendingPoolWrite,
+)
 from agentic_sim.runtime.prefill_batcher import (
     PrefillBatch,
     PrefillBatcher,
@@ -41,8 +52,15 @@ __all__ = [
     "AttentionKVState",
     "CapacityWaiter",
     "DecodeEpisodePhase",
+    "CompletedPoolWrite",
+    "DecodeBatch",
+    "DecodeBatcher",
+    "DecodeController",
     "DecodeEpisodeState",
+    "DecodeStepResult",
     "KVSnapshot",
+    "LocalAttentionBatch",
+    "PendingPoolWrite",
     "PrefillBatch",
     "PrefillBatchResult",
     "PrefillBatcher",

@@ -1,117 +1,108 @@
-"""Iteration-level continuous decode batching."""
+"""Deterministic local attention batches for one synchronized decode step."""
 
 from __future__ import annotations
 
-from collections.abc import Callable
+import math
+from collections.abc import Sequence
 from dataclasses import dataclass
 
-from agentic_sim.core.event import EventType
-from agentic_sim.core.event_engine import EventEngine
-from agentic_sim.hardware.device import DecodeSettings, Device
-from agentic_sim.metrics.batching_metrics import DecodeIterationMetric
-from agentic_sim.metrics.collector import MetricsCollector
-from agentic_sim.runtime.phase_state import InvocationPhase, InvocationSession
+from agentic_sim.hardware.compute_models import AttentionWork
+from agentic_sim.runtime.session import (
+    AttentionKVResidency,
+    DecodeEpisodePhase,
+    SessionState,
+)
+
+
+def _time(value: float, field_name: str) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError(f"{field_name} must be a finite non-negative number")
+    result = float(value)
+    if not math.isfinite(result) or result < 0.0:
+        raise ValueError(f"{field_name} must be a finite non-negative number")
+    return result
 
 
 @dataclass(frozen=True)
-class DecodeStepCompletion:
-    iteration_id: int
-    sessions: tuple[InvocationSession, ...]
-    service_time: float
+class LocalAttentionBatch:
+    """The active sessions and analytical work assigned to one DP device."""
+
+    device_id: int
+    sessions: tuple[SessionState, ...]
+    work: tuple[AttentionWork, ...]
 
 
-class DecodeBatchController:
-    def __init__(
+@dataclass(frozen=True)
+class DecodeBatch:
+    """One global active batch and all mapped DP-local batches."""
+
+    decode_step: int
+    ready_time_s: float
+    sessions: tuple[SessionState, ...]
+    local_batches: tuple[LocalAttentionBatch, ...]
+
+    @property
+    def size(self) -> int:
+        return len(self.sessions)
+
+
+class DecodeBatcher:
+    """Build immutable step batches without owning queues or session progress."""
+
+    def __init__(self, device_ids: tuple[int, ...]) -> None:
+        if not device_ids or len(set(device_ids)) != len(device_ids):
+            raise ValueError("attention batch device IDs must be non-empty and unique")
+        self.device_ids = device_ids
+
+    def form(
         self,
-        engine: EventEngine,
-        device: Device,
-        settings: DecodeSettings,
-        metrics: MetricsCollector,
-        on_session_admitted: Callable[[InvocationSession, float], None],
-        on_token: Callable[[InvocationSession, float, float], None],
-        on_session_complete: Callable[[InvocationSession], None],
-    ) -> None:
-        self.engine = engine
-        self.device = device
-        self.settings = settings
-        self.metrics = metrics
-        self.on_session_admitted = on_session_admitted
-        self.on_token = on_token
-        self.on_session_complete = on_session_complete
-        self.waiting: list[InvocationSession] = []
-        self.active: list[InvocationSession] = []
-        self.in_flight = False
-        self._launch_scheduled = False
-        self._next_iteration_id = 0
+        sessions: Sequence[SessionState],
+        decode_step: int,
+        ready_time_s: float,
+    ) -> DecodeBatch:
+        if isinstance(decode_step, bool) or not isinstance(decode_step, int) or decode_step < 0:
+            raise ValueError("decode_step must be a non-negative integer")
+        ready = _time(ready_time_s, "ready_time_s")
+        ordered = tuple(sorted(sessions, key=lambda session: session.session_id))
+        session_ids = tuple(session.session_id for session in ordered)
+        if len(set(session_ids)) != len(session_ids):
+            raise ValueError("decode batch contains duplicate session IDs")
+        if not ordered:
+            raise ValueError("decode batch requires at least one ready session")
 
-    def enqueue(self, session: InvocationSession) -> None:
-        session.phase = InvocationPhase.WAITING_DECODE
-        session.decode_queued_at = self.engine.now
-        self.waiting.append(session)
-        self.metrics.decode_state_changed(self.engine.now, len(self.waiting), len(self.active))
-        self._request_iteration()
+        grouped: dict[int, list[SessionState]] = {
+            device_id: [] for device_id in self.device_ids
+        }
+        for session in ordered:
+            episode = session.current_episode
+            attention = session.kv.attention
+            if episode is None or episode.phase is not DecodeEpisodePhase.ACTIVE:
+                raise ValueError("decode batch sessions must have active episodes")
+            if attention.state is not AttentionKVResidency.ACTIVE:
+                raise ValueError("decode batch sessions must have active attention KV")
+            if episode.remaining_output_tokens <= 0:
+                raise ValueError("decode batch sessions must have output remaining")
+            if episode.attention_ready_time_s is None:
+                raise ValueError("decode batch session has a pending attention transfer")
+            if episode.attention_ready_time_s > ready:
+                raise ValueError("decode batch session is not ready at the launch time")
+            if attention.device_id not in grouped:
+                raise ValueError("decode batch session affinity is outside the DP mapping")
+            grouped[attention.device_id].append(session)
 
-    def handle_start(self) -> None:
-        self._launch_scheduled = False
-        if self.in_flight:
-            return
-        while self.waiting and len(self.active) < self.settings.max_active_sessions:
-            session = self.waiting.pop(0)
-            if session.remaining_output_tokens <= 0:
-                session.phase = InvocationPhase.COMPLETE
-                self.on_session_complete(session)
-                continue
-            session.phase = InvocationPhase.DECODING
-            if session.decode_started_at is None:
-                session.decode_started_at = self.engine.now
-                queued_at = session.decode_queued_at if session.decode_queued_at is not None else self.engine.now
-                self.on_session_admitted(session, self.engine.now - queued_at)
-            self.active.append(session)
-        self.metrics.decode_state_changed(self.engine.now, len(self.waiting), len(self.active))
-        if not self.active:
-            return
-
-        batch_size = len(self.active)
-        service_time = self.device.fixed_latency + max(
-            1.0 / self.settings.single_session_tokens_per_second,
-            batch_size / self.settings.max_system_tokens_per_second,
-        )
-        reservation = self.device.queue.reserve(self.engine.now, service_time)
-        iteration_id = self._next_iteration_id
-        self._next_iteration_id += 1
-        completion = DecodeStepCompletion(iteration_id, tuple(self.active), service_time)
-        self.in_flight = True
-        self.metrics.decode_iteration_started(
-            DecodeIterationMetric(
-                iteration_id=iteration_id,
-                start_time_s=self.engine.now,
-                finish_time_s=reservation.finish_time,
-                active_sessions=batch_size,
-                waiting_sessions=len(self.waiting),
-                emitted_tokens=batch_size,
+        local_batches = tuple(
+            LocalAttentionBatch(
+                device_id=device_id,
+                sessions=tuple(grouped[device_id]),
+                work=tuple(
+                    AttentionWork(
+                        session_id=session.session_id,
+                        context_tokens=session.current_context_tokens,
+                        device_id=device_id,
+                    )
+                    for session in grouped[device_id]
+                ),
             )
+            for device_id in self.device_ids
         )
-        self.engine.schedule(reservation.finish_time, EventType.DECODE_STEP_FINISH, completion)
-
-    def handle_finish(self, completion: DecodeStepCompletion) -> None:
-        self.in_flight = False
-        finished: list[InvocationSession] = []
-        for session in completion.sessions:
-            session.generated_tokens += 1
-            session.remaining_output_tokens -= 1
-            session.token_times.append(self.engine.now)
-            self.on_token(session, self.engine.now, completion.service_time)
-            if session.remaining_output_tokens == 0:
-                finished.append(session)
-        for session in finished:
-            self.active.remove(session)
-            session.phase = InvocationPhase.COMPLETE
-            self.on_session_complete(session)
-        self.metrics.decode_state_changed(self.engine.now, len(self.waiting), len(self.active))
-        self._request_iteration()
-
-    def _request_iteration(self) -> None:
-        if self.in_flight or self._launch_scheduled or not (self.active or self.waiting):
-            return
-        self._launch_scheduled = True
-        self.engine.schedule(self.engine.now, EventType.DECODE_ITERATION_START)
+        return DecodeBatch(decode_step, ready, ordered, local_batches)

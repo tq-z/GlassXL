@@ -1,5 +1,7 @@
 """Explicit model-to-hardware placement policies."""
 
+from agentic_sim.mapping.experts import ExpertDeviceBatch, ExpertMapping
+
 from agentic_sim.mapping.attention import (
     AttentionPlacementPolicy,
     LeastActiveContextPlacement,
@@ -15,6 +17,8 @@ from agentic_sim.mapping.prefill import (
 
 __all__ = [
     "AttentionPlacementPolicy",
+    "ExpertDeviceBatch",
+    "ExpertMapping",
     "LeastActiveContextPlacement",
     "PrefillPlacementPolicy",
     "RoundRobinAttentionPlacement",

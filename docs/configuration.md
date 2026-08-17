@@ -203,9 +203,40 @@ while loading, before any random generator is constructed.
 | `decode_ffn.experts_by_device` | mapping of integer device ID to list | yes | — | exactly one entry for every listed FFN device; no extra devices | One placement shared by every layer in V1. |
 | `decode_ffn.experts_by_device.<device>` | list of integers | yes | — | non-empty; IDs in `[0, num_experts)`; every expert covered exactly once | Assigns several experts to one EP rank. Replication and uncovered experts are rejected. |
 
+## Decode-step execution semantics
+
+The mapping fields above drive one synchronized whole-model step;
+`model.num_layers` does not repeat any stage. At launch time, every mapped
+attention DP device submits one local batch, including an empty batch when it
+has no ready sessions. Local attention uses `sum(C_i) / rate`, and all mapped DP
+devices meet at a global attention barrier. For global active batch `B`:
+
+```text
+A = B * model.top_k
+N_EP = len(decode_ffn.device_ids)
+send_tokens = max(1, ceil(A / N_EP))
+```
+
+Dispatch and combine each submit the same full logical all-to-all over the union
+of mapped attention and FFN device IDs. This cost remains present when the two
+roles are co-located. The communication floor does not create compute work:
+`A` is divided across `model.num_experts` by expert-ID-ordered quotient and
+remainder, so expert activation counts sum exactly to `A`. Loads are grouped by
+`decode_ffn.experts_by_device`, and every FFN device submits one atomic job
+before the global FFN barrier. Combine completes before each ready session emits
+exactly one token and increments its context.
+
+A session keeps its selected attention-device affinity for the episode. After
+the oracle output completes, the runtime schedules one KV-pool offload containing
+the unsynchronized `P + O` tokens. The copy remains `DRAINING_DIRTY` and consumes
+attention capacity until that modeled reservation completes. Completion makes
+the pool snapshot recoverable, then `lru_cache` retains a clean inactive copy or
+`active_only` removes it. A zero-output episode skips decode/AFD work and still
+performs its required P-only pool write.
+
 The same physical ID may be mapped for attention and FFN when the hardware
-device declares both capabilities. Such roles will share one physical execution
-queue when Milestone 2 constructs devices.
+device declares both capabilities. All compute, collective endpoint, KV-transfer
+endpoint, and pool endpoint work for that physical ID shares one FCFS queue.
 
 ## Error behavior
 

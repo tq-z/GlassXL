@@ -45,6 +45,7 @@ class AttentionAdmission:
     cache_hit: bool
     evicted_session_ids: tuple[int, ...]
     capacity_wait_s: float
+    transfer_pending: bool = False
 
 
 @dataclass(frozen=True)
@@ -54,6 +55,7 @@ class CapacityWaiter:
     sequence_id: int
     enqueued_time_s: float
     session: SessionState
+    transfer_pending: bool = False
 
 
 @dataclass(frozen=True)
@@ -290,17 +292,21 @@ class AttentionAdmissionController:
         self,
         session: SessionState,
         ready_time_s: float,
+        *,
+        defer_transfer: bool = False,
     ) -> AttentionAdmission | None:
         ready = _time(ready_time_s, "ready_time_s")
+        if not isinstance(defer_transfer, bool):
+            raise ValueError("defer_transfer must be a boolean")
         self._validate_new_submission(session, ready)
         if self._waiters:
-            self._enqueue(session, ready)
+            self._enqueue(session, ready, defer_transfer)
             return None
         plan = self._select_plan(session)
         if plan is None:
-            self._enqueue(session, ready)
+            self._enqueue(session, ready, defer_transfer)
             return None
-        return self._commit(plan, session, ready)
+        return self._commit(plan, session, ready, defer_transfer)
 
     def retry(self, retry_time_s: float) -> tuple[AttentionAdmission, ...]:
         retry_time = _time(retry_time_s, "retry_time_s")
@@ -315,7 +321,14 @@ class AttentionAdmissionController:
             if plan is None:
                 break
             self._waiters.popleft()
-            admissions.append(self._commit(plan, waiter.session, retry_time))
+            admissions.append(
+                self._commit(
+                    plan,
+                    waiter.session,
+                    retry_time,
+                    waiter.transfer_pending,
+                )
+            )
         return tuple(admissions)
 
     def complete_pool_write(
@@ -391,13 +404,19 @@ class AttentionAdmissionController:
         elif registered is not None:
             raise ValueError("evicted session cannot remain registered on attention")
 
-    def _enqueue(self, session: SessionState, ready_time_s: float) -> None:
+    def _enqueue(
+        self,
+        session: SessionState,
+        ready_time_s: float,
+        transfer_pending: bool,
+    ) -> None:
         session.begin_attention_capacity_wait(ready_time_s)
         self._waiters.append(
             CapacityWaiter(
                 sequence_id=self._next_waiter_sequence,
                 enqueued_time_s=ready_time_s,
                 session=session,
+                transfer_pending=transfer_pending,
             )
         )
         self._next_waiter_sequence += 1
@@ -438,6 +457,7 @@ class AttentionAdmissionController:
         plan: AttentionCapacityPlan,
         session: SessionState,
         admission_time_s: float,
+        transfer_pending: bool,
     ) -> AttentionAdmission:
         device = self.devices[plan.device_id]
         for victim_id in plan.evicted_session_ids:
@@ -447,6 +467,7 @@ class AttentionAdmissionController:
             admission_time_s=admission_time_s,
             transfer_tokens=plan.transfer_tokens,
             cache_hit=plan.cache_hit,
+            transfer_pending=transfer_pending,
         )
         for victim_id in plan.evicted_session_ids:
             device.evict_clean(victim_id)
@@ -464,6 +485,7 @@ class AttentionAdmissionController:
             cache_hit=plan.cache_hit,
             evicted_session_ids=plan.evicted_session_ids,
             capacity_wait_s=episode.attention_capacity_wait_s,
+            transfer_pending=transfer_pending,
         )
 
     def _protected_affinities(self) -> dict[int, frozenset[int]]:

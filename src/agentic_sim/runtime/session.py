@@ -395,6 +395,7 @@ class SessionState:
         admission_time_s: float | None = None,
         transfer_tokens: int | None = None,
         cache_hit: bool | None = None,
+        transfer_pending: bool = False,
     ) -> None:
         if self.current_episode is None:
             raise ValueError("session has no active episode")
@@ -424,10 +425,12 @@ class SessionState:
             raise ValueError("attention admission cannot precede turn readiness")
         if transfer_tokens is not None:
             _nonnegative_integer(transfer_tokens, "transfer_tokens")
+        if not isinstance(transfer_pending, bool):
+            raise ValueError("transfer_pending must be a boolean")
         self.kv.attention.activate(device_id, self.kv.current_snapshot)
         episode.context_at_decode_start = self.current_context_tokens
         episode.attention_admitted_time_s = admitted
-        episode.attention_ready_time_s = admitted
+        episode.attention_ready_time_s = None if transfer_pending else admitted
         episode.attention_transfer_tokens = transfer_tokens
         episode.attention_cache_hit = cache_hit
         episode.phase = DecodeEpisodePhase.ACTIVE
@@ -440,6 +443,8 @@ class SessionState:
             raise ValueError("attention transfer requires a timed capacity admission")
         if episode.attention_transfer_tokens is None:
             raise ValueError("attention transfer payload is unavailable")
+        if episode.attention_ready_time_s is not None:
+            raise ValueError("attention transfer has already completed")
         if completion < episode.attention_admitted_time_s:
             raise ValueError("attention transfer cannot precede capacity admission")
         episode.attention_ready_time_s = completion

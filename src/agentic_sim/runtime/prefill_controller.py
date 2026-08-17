@@ -321,6 +321,7 @@ class PrefillController:
             admission = self.attention.submit(
                 session,
                 scheduled.compute.finish_time,
+                defer_transfer=True,
             )
             if admission is None:
                 blocked.append(session.session_id)
