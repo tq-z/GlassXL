@@ -1,0 +1,77 @@
+# Hardware schema. Implemented schema_version values: 1.
+schema_version: 1
+
+# Physical devices. IDs are non-negative integers and must be unique.
+# Each device has one shared execution queue in the runtime built by later milestones.
+devices:
+  - id: 0
+    capabilities:
+      # Implemented prefill models: aggregate_throughput.
+      prefill:
+        model: aggregate_throughput
+        # Aggregate prefill capacity in newly-prefilled tokens/s; must be > 0.
+        tokens_per_second: 40000
+
+  - id: 1
+    capabilities:
+      # Implemented decode-attention models: linear_context.
+      decode_attn:
+        model: linear_context
+        # Whole-model context processing capacity in context tokens/s; must be > 0.
+        context_tokens_per_second: 2000000
+        # Attention-resident KV capacity in tokens; must be >= 0.
+        kv_capacity_tokens: 262144
+
+  - id: 2
+    capabilities:
+      # Implemented decode-attention models: linear_context.
+      decode_attn:
+        model: linear_context
+        context_tokens_per_second: 2000000
+        kv_capacity_tokens: 262144
+
+  - id: 3
+    capabilities:
+      # Implemented decode-FFN models: linear_expert_batch.
+      decode_ffn:
+        model: linear_expert_batch
+        # Whole-model routed expert-activation capacity in tokens/s; must be > 0.
+        tokens_per_second: 100000
+
+  - id: 4
+    capabilities:
+      # Implemented decode-FFN models: linear_expert_batch.
+      decode_ffn:
+        model: linear_expert_batch
+        tokens_per_second: 100000
+
+# Recoverable KV backing pool. It has one globally contended queue in V1.
+kv_pool:
+  # Optional; defaults to null. V1 supports only null (unbounded capacity).
+  capacity_tokens: null
+  # Load and offload rates are token-equivalent tokens/s, must be > 0, and
+  # must be equal because V1 uses a symmetric pool transfer rate.
+  load_tokens_per_second: 1000000
+  offload_tokens_per_second: 1000000
+  # Per-operation startup latency in microseconds; must be >= 0.
+  start_latency_us: 5
+
+# Both named global interconnect resources are required.
+interconnects:
+  ffn_all_to_all:
+    # Implemented FFN all-to-all models: startup_min_package.
+    model: startup_min_package
+    # Startup latency in microseconds; must be >= 0.
+    start_latency_us: 10
+    # Token-equivalent payload floor; must be a non-negative integer.
+    min_package_tokens: 1
+    # Token-equivalent throughput in tokens/s; must be > 0.
+    throughput_tokens_per_second: 1000000
+
+  kv_p2p:
+    # Implemented KV P2P models: startup_throughput.
+    model: startup_throughput
+    # Startup latency in microseconds; must be >= 0.
+    start_latency_us: 5
+    # Token-equivalent throughput in tokens/s; must be > 0.
+    throughput_tokens_per_second: 1000000

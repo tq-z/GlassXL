@@ -1,6 +1,5 @@
-"""Agentic inference discrete-event simulator."""
+"""Agentic inference simulator under breaking PD/AFD reconstruction."""
 
-from agentic_sim.config import load_config
-from agentic_sim.core.simulation import Simulation, SimulationResult
+from agentic_sim.config import ConfigurationError, SimulationConfig, load_config
 
-__all__ = ["Simulation", "SimulationResult", "load_config"]
+__all__ = ["ConfigurationError", "SimulationConfig", "load_config"]

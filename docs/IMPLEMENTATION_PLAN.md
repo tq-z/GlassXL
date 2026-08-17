@@ -1159,7 +1159,7 @@ silently.
    [A] Ues physical-device queues. not direction-specific rate (they are symmetric)
 9. Pool payload: after an episode, write all unsynchronized P + O, or the
    complete final context? P + O reduces to O when P = 0.
-   [A] give an an option here. Do the unsynchronized P+O as default. 
+   [A] Do the unsynchronized P+O as default.
 10. Pool/tool join: must the next turn wait for both tool return and pool-write
     completion, or only when it needs the pool copy?
    [A] both completion
@@ -1177,7 +1177,7 @@ silently.
     [A] yes
 14. Stateful capacity: is retained prefill KV capacity modeled? If prefill and
     attention are co-located, do their KV copies share one memory budget?
-    [A] Prefill KV capcity should be large enough for prefill. 
+    [A] Prefill will not be allowed to map to same node as decode. Prefill KV capcity should be large enough for prefill.
 15. Timing: serialize KV load, prefill compute, and P-to-D transfer, or allow
     overlap?
     [A] sequential 
@@ -1186,6 +1186,7 @@ silently.
     [A] yes
 17. Placement: use sticky_round_robin for stateful prefill and round_robin for
     stateless prefill? Define cursor, state-loss, and remapping behavior.
+    [A] yes. We assume the prefill nodes' memory is shared by all prefill compute node. (in the current coarse implementation, prefill node is abstracted as a single device. So there is no remapping issue. )
 18. Warm start: where does initial KV exist -- prefill, attention, pool, or
     multiple locations -- and which first transfer is free?
     [A] Assume the initl KV context has been prefilled and in the pool. 
@@ -1194,6 +1195,7 @@ silently.
     [A] Yes
 20. Ordering: perform prefill before attention admission as proposed, and keep a
     transient stateless copy while admission is capacity-blocked?
+    [A]y Yes
 
 ### 17.4 Attention placement and residency
 
@@ -1205,6 +1207,7 @@ silently.
     [A] no migration. Just wait
 23. Oracle commitment: hold C_decode_start + O_oracle for the full episode, with
     actual context growth offset by declining remaining output?
+    [A] Yes
 24. Round-robin: scan for the first feasible device, or test only the cursor
     device?
     [A] scan for the first
@@ -1229,7 +1232,7 @@ silently.
     [A] infer
 31. Field names and CLI: accept context_tokens/prefill_tokens and the proposed
     three-path CLI?
-    [A] NO keep one should be enough. 
+    [A] yes.
 32. TTFT: measure turn_ready_time through first emitted-token completion, with
     initial turn_ready_time equal to arrival?
     [A] yes. 
