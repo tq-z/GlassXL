@@ -1,7 +1,7 @@
-"""Synthetic agentic workload models."""
+"""Strict synthetic workload specifications and generation."""
 
-from agentic_sim.workload.agent import Agent, AgentState
-from agentic_sim.workload.invocation import Invocation, KVRetentionMode
+from agentic_sim.workload.agent import SessionSpec
+from agentic_sim.workload.invocation import TurnSpec
 from agentic_sim.workload.workload_generator import WorkloadGenerator
 
-__all__ = ["Agent", "AgentState", "Invocation", "KVRetentionMode", "WorkloadGenerator"]
+__all__ = ["SessionSpec", "TurnSpec", "WorkloadGenerator"]

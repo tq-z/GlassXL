@@ -1,62 +1,39 @@
-"""Multi-turn agent state."""
+"""Immutable long-lived session workload specification."""
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
-from enum import Enum, auto
+
+from agentic_sim.workload.invocation import TurnSpec, _nonnegative_integer
 
 
-class AgentState(Enum):
-    NOT_ARRIVED = auto()
-    READY = auto()
-    RUNNING = auto()
-    TOOL_WAIT = auto()
-    KV_WAIT = auto()
-    FINISHED = auto()
+@dataclass(frozen=True)
+class SessionSpec:
+    """One warm-start session and all of its oracle turn records."""
 
-
-@dataclass
-class Agent:
-    agent_id: int
-    arrival_time: float
-    state: AgentState
-    num_turns: int
-    current_turn: int
-    input_tokens_per_turn: list[int]
-    output_tokens_per_turn: list[int]
-    tool_wait_per_turn: list[float]
-    initial_context_tokens: int | None = None
-    current_context_tokens: int = 0
-    start_time: float | None = None
-    finish_time: float | None = None
-    active_execution_time: float = 0.0
-    queueing_time: float = 0.0
-    actual_tool_wait_time: float = 0.0
+    session_id: int
+    arrival_time_s: float
+    initial_context_tokens: int
+    turns: tuple[TurnSpec, ...]
 
     def __post_init__(self) -> None:
-        if self.num_turns <= 0:
-            raise ValueError("an agent must have at least one turn")
-        for values in (
-            self.input_tokens_per_turn,
-            self.output_tokens_per_turn,
-            self.tool_wait_per_turn,
+        _nonnegative_integer(self.session_id, "session_id")
+        _nonnegative_integer(self.initial_context_tokens, "initial_context_tokens")
+        if (
+            isinstance(self.arrival_time_s, bool)
+            or not isinstance(self.arrival_time_s, (int, float))
+            or not math.isfinite(float(self.arrival_time_s))
+            or self.arrival_time_s < 0.0
         ):
-            if len(values) != self.num_turns:
-                raise ValueError("per-turn arrays must match num_turns")
-        if self.initial_context_tokens is not None and self.initial_context_tokens < 0:
-            raise ValueError("initial context tokens must be non-negative")
+            raise ValueError("arrival_time_s must be a finite non-negative number")
+        if not self.turns:
+            raise ValueError("a session must contain at least one turn")
+        expected_indices = tuple(range(len(self.turns)))
+        actual_indices = tuple(turn.turn_index for turn in self.turns)
+        if actual_indices != expected_indices:
+            raise ValueError("turn indices must be contiguous and start at zero")
 
     @property
-    def is_last_turn(self) -> bool:
-        return self.current_turn == self.num_turns - 1
-
-    @property
-    def current_input_tokens(self) -> int:
-        """Return the first prompt or the current turn's newly arrived input."""
-
-        if self.current_turn == 0 and self.initial_context_tokens is not None:
-            return self.initial_context_tokens
-        return self.input_tokens_per_turn[self.current_turn]
-
-    def complete_current_turn(self) -> None:
-        self.current_context_tokens += self.current_input_tokens + self.output_tokens_per_turn[self.current_turn]
+    def num_turns(self) -> int:
+        return len(self.turns)

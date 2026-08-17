@@ -1,65 +1,55 @@
-"""Seeded synthetic multi-turn workload generation."""
+"""Seeded synthetic generation of immutable V1 session records."""
 
 from __future__ import annotations
 
 import random
-from typing import Any
 
-from agentic_sim.workload.agent import Agent, AgentState
+from agentic_sim.config.models import WorkloadConfig
+from agentic_sim.workload.agent import SessionSpec
 from agentic_sim.workload.arrival import poisson_arrival_times
 from agentic_sim.workload.distributions import distribution_from_config
+from agentic_sim.workload.invocation import TurnSpec
 
 
 class WorkloadGenerator:
-    def __init__(self, config: dict[str, Any], seed: int) -> None:
+    """Generate the same typed workload for every call under one fixed seed."""
+
+    def __init__(self, config: WorkloadConfig) -> None:
         self.config = config
-        self.rng = random.Random(seed)
 
-    def generate(self) -> list[Agent]:
-        num_agents = int(self.config["num_agents"])
-        arrival = self.config["arrival"]
-        if str(arrival.get("type", "")).lower() != "poisson":
-            raise ValueError("PR2 supports only Poisson arrivals")
+    def generate(self) -> tuple[SessionSpec, ...]:
+        rng = random.Random(self.config.seed)
+        source = self.config.source
         arrival_times = poisson_arrival_times(
-            num_agents,
-            float(arrival["rate_per_second"]),
-            self.rng,
+            source.num_sessions,
+            source.arrival.rate_per_second,
+            rng,
         )
-        turns_distribution = distribution_from_config(self.config["turns"])
-        input_distribution = distribution_from_config(self.config["input_tokens"])
-        context_distribution = (
-            distribution_from_config(self.config["context_tokens"])
-            if "context_tokens" in self.config
-            else None
-        )
-        output_distribution = distribution_from_config(self.config["output_tokens"])
-        wait_distribution = distribution_from_config(self.config["tool_wait_ms"])
+        turns_distribution = distribution_from_config(source.turns)
+        context_distribution = distribution_from_config(source.context_tokens)
+        prefill_distribution = distribution_from_config(source.prefill_tokens)
+        output_distribution = distribution_from_config(source.output_tokens)
+        wait_distribution = distribution_from_config(source.tool_wait_ms)
 
-        agents: list[Agent] = []
-        for agent_id, arrival_time in enumerate(arrival_times):
-            num_turns = max(1, int(round(turns_distribution.sample(self.rng))))
-            initial_context_tokens: int | None = None
-            if context_distribution is None:
-                inputs = [max(0, int(round(input_distribution.sample(self.rng)))) for _ in range(num_turns)]
-            else:
-                initial_context_tokens = max(0, int(round(context_distribution.sample(self.rng))))
-                inputs = [0] + [
-                    max(0, int(round(input_distribution.sample(self.rng))))
-                    for _ in range(num_turns - 1)
-                ]
-            outputs = [max(0, int(round(output_distribution.sample(self.rng)))) for _ in range(num_turns)]
-            waits = [max(0.0, wait_distribution.sample(self.rng) / 1_000.0) for _ in range(num_turns)]
-            agents.append(
-                Agent(
-                    agent_id=agent_id,
-                    arrival_time=arrival_time,
-                    state=AgentState.NOT_ARRIVED,
-                    num_turns=num_turns,
-                    current_turn=0,
-                    input_tokens_per_turn=inputs,
-                    output_tokens_per_turn=outputs,
-                    tool_wait_per_turn=waits,
+        sessions: list[SessionSpec] = []
+        for session_id, arrival_time_s in enumerate(arrival_times):
+            num_turns = int(round(turns_distribution.sample(rng)))
+            initial_context_tokens = int(round(context_distribution.sample(rng)))
+            turns = tuple(
+                TurnSpec(
+                    turn_index=turn_index,
+                    prefill_tokens=int(round(prefill_distribution.sample(rng))),
+                    output_tokens=int(round(output_distribution.sample(rng))),
+                    tool_wait_s=wait_distribution.sample(rng) / 1_000.0,
+                )
+                for turn_index in range(num_turns)
+            )
+            sessions.append(
+                SessionSpec(
+                    session_id=session_id,
+                    arrival_time_s=arrival_time_s,
                     initial_context_tokens=initial_context_tokens,
+                    turns=turns,
                 )
             )
-        return agents
+        return tuple(sessions)

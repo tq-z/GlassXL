@@ -1,15 +1,26 @@
-"""Reusable deterministic distribution wrappers."""
+"""Reusable deterministic distributions built from typed workload config."""
 
 from __future__ import annotations
 
 import math
 import random
 from dataclasses import dataclass
-from typing import Any, Protocol
+from typing import Protocol
+
+from agentic_sim.config.models import (
+    BoundedIntegerDistributionConfig,
+    ConstantDistributionConfig,
+    DiscreteDistributionConfig,
+    DistributionConfig,
+    ExponentialDistributionConfig,
+    LognormalDistributionConfig,
+    UniformDistributionConfig,
+)
 
 
 class Distribution(Protocol):
-    def sample(self, rng: random.Random) -> float: ...
+    def sample(self, rng: random.Random) -> float:
+        """Draw one deterministic value from the supplied RNG."""
 
 
 @dataclass(frozen=True)
@@ -35,8 +46,6 @@ class ExponentialDistribution:
     rate: float
 
     def sample(self, rng: random.Random) -> float:
-        if self.rate <= 0.0:
-            raise ValueError("exponential rate must be positive")
         return rng.expovariate(self.rate)
 
 
@@ -64,8 +73,8 @@ class DiscreteDistribution:
     def __post_init__(self) -> None:
         if not self.values or len(self.values) != len(self.probabilities):
             raise ValueError("discrete values and probabilities must have equal non-zero length")
-        if any(probability < 0.0 for probability in self.probabilities):
-            raise ValueError("discrete probabilities cannot be negative")
+        if any(not math.isfinite(probability) or probability < 0.0 for probability in self.probabilities):
+            raise ValueError("discrete probabilities must be finite and non-negative")
         if not math.isclose(sum(self.probabilities), 1.0, rel_tol=1e-9, abs_tol=1e-12):
             raise ValueError("discrete probabilities must sum to one")
 
@@ -84,34 +93,35 @@ class BoundedIntegerDistribution:
     minimum: int
     maximum: int
 
-    def sample(self, rng: random.Random) -> float:
+    def __post_init__(self) -> None:
         if self.minimum > self.maximum:
             raise ValueError("bounded integer minimum exceeds maximum")
+
+    def sample(self, rng: random.Random) -> float:
         return float(rng.randint(self.minimum, self.maximum))
 
 
-def distribution_from_config(config: dict[str, Any]) -> Distribution:
-    """Build a distribution from a workload YAML mapping."""
+def distribution_from_config(config: DistributionConfig) -> Distribution:
+    """Build a distribution exclusively from the strict typed V1 schema."""
 
-    distribution_type = str(config.get("type", "")).lower()
-    if distribution_type == "constant":
-        return ConstantDistribution(float(config["value"]))
-    if distribution_type == "uniform":
-        return UniformDistribution(float(config["min"]), float(config["max"]))
-    if distribution_type == "exponential":
-        return ExponentialDistribution(float(config["rate"]))
-    if distribution_type == "lognormal":
+    if isinstance(config, ConstantDistributionConfig):
+        return ConstantDistribution(float(config.value))
+    if isinstance(config, UniformDistributionConfig):
+        return UniformDistribution(config.minimum, config.maximum)
+    if isinstance(config, ExponentialDistributionConfig):
+        return ExponentialDistribution(config.rate)
+    if isinstance(config, LognormalDistributionConfig):
         return LognormalDistribution(
-            mean=float(config["mean"]),
-            sigma=float(config["sigma"]),
-            minimum=float(config["min"]) if "min" in config else None,
-            maximum=float(config["max"]) if "max" in config else None,
+            mean=config.mean,
+            sigma=config.sigma,
+            minimum=config.minimum,
+            maximum=config.maximum,
         )
-    if distribution_type in {"discrete", "categorical"}:
+    if isinstance(config, DiscreteDistributionConfig):
         return DiscreteDistribution(
-            tuple(float(value) for value in config["values"]),
-            tuple(float(value) for value in config["probabilities"]),
+            tuple(float(value) for value in config.values),
+            config.probabilities,
         )
-    if distribution_type in {"bounded_integer", "bounded_int"}:
-        return BoundedIntegerDistribution(int(config["min"]), int(config["max"]))
-    raise ValueError(f"unsupported distribution type: {distribution_type!r}")
+    if isinstance(config, BoundedIntegerDistributionConfig):
+        return BoundedIntegerDistribution(config.minimum, config.maximum)
+    raise TypeError(f"unsupported typed distribution config: {type(config).__name__}")

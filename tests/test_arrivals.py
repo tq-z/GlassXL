@@ -2,6 +2,12 @@ import random
 
 import pytest
 
+from agentic_sim.config.models import (
+    BoundedIntegerDistributionConfig,
+    DiscreteDistributionConfig,
+    DistributionType,
+    LognormalDistributionConfig,
+)
 from agentic_sim.workload.arrival import poisson_arrival_times
 from agentic_sim.workload.distributions import distribution_from_config
 
@@ -14,14 +20,30 @@ def test_poisson_arrivals_are_monotonic_and_reproducible() -> None:
     assert first[0] > 0.0
 
 
-def test_supported_distributions_are_bounded() -> None:
+def test_supported_typed_distributions_are_bounded() -> None:
     rng = random.Random(3)
     lognormal = distribution_from_config(
-        {"type": "lognormal", "mean": 2.0, "sigma": 4.0, "min": 5, "max": 8}
+        LognormalDistributionConfig(
+            DistributionType.LOGNORMAL,
+            mean=2.0,
+            sigma=4.0,
+            minimum=5.0,
+            maximum=8.0,
+        )
     )
-    bounded = distribution_from_config({"type": "bounded_integer", "min": 2, "max": 4})
+    bounded = distribution_from_config(
+        BoundedIntegerDistributionConfig(
+            DistributionType.BOUNDED_INTEGER,
+            minimum=2,
+            maximum=4,
+        )
+    )
     discrete = distribution_from_config(
-        {"type": "discrete", "values": [1, 2], "probabilities": [0.25, 0.75]}
+        DiscreteDistributionConfig(
+            DistributionType.DISCRETE,
+            values=(1, 2),
+            probabilities=(0.25, 0.75),
+        )
     )
     assert all(5 <= lognormal.sample(rng) <= 8 for _ in range(20))
     assert all(bounded.sample(rng) in {2.0, 3.0, 4.0} for _ in range(20))
@@ -29,7 +51,10 @@ def test_supported_distributions_are_bounded() -> None:
 
 
 def test_invalid_discrete_probabilities_are_rejected() -> None:
+    config = DiscreteDistributionConfig(
+        DistributionType.DISCRETE,
+        values=(1, 2),
+        probabilities=(0.2, 0.2),
+    )
     with pytest.raises(ValueError, match="sum to one"):
-        distribution_from_config(
-            {"type": "discrete", "values": [1, 2], "probabilities": [0.2, 0.2]}
-        )
+        distribution_from_config(config)
