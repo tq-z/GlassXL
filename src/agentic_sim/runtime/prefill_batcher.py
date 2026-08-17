@@ -1,104 +1,141 @@
-"""Dynamic FCFS whole-prompt prefill batching."""
+"""Deterministic FCFS greedy batching for typed prefill sessions."""
 
 from __future__ import annotations
 
-from collections.abc import Callable
+import math
+from collections import deque
 from dataclasses import dataclass
 
-from agentic_sim.core.event import EventType
-from agentic_sim.core.event_engine import EventEngine
-from agentic_sim.hardware.device import Device, PrefillSettings
-from agentic_sim.metrics.batching_metrics import PrefillBatchMetric
-from agentic_sim.metrics.collector import MetricsCollector
-from agentic_sim.runtime.phase_state import InvocationPhase, InvocationSession
+from agentic_sim.runtime.session import DecodeEpisodePhase, SessionState
+
+
+def _time(value: float, field_name: str) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError(f"{field_name} must be a finite non-negative number")
+    result = float(value)
+    if not math.isfinite(result) or result < 0.0:
+        raise ValueError(f"{field_name} must be a finite non-negative number")
+    return result
 
 
 @dataclass(frozen=True)
-class PrefillBatchCompletion:
+class PrefillRequest:
+    """One session waiting on its selected prefill device."""
+
+    sequence_id: int
+    ready_time_s: float
+    device_id: int
+    session: SessionState
+
+
+@dataclass(frozen=True)
+class PrefillBatch:
+    """All currently ready FCFS requests greedily selected for one device."""
+
     batch_id: int
-    sessions: tuple[InvocationSession, ...]
+    device_id: int
+    launch_time_s: float
+    requests: tuple[PrefillRequest, ...]
 
 
-class PrefillBatchController:
-    def __init__(
-        self,
-        engine: EventEngine,
-        device: Device,
-        settings: PrefillSettings,
-        metrics: MetricsCollector,
-        on_session_start: Callable[[InvocationSession, float, float], None],
-        on_session_complete: Callable[[InvocationSession], None],
-    ) -> None:
-        self.engine = engine
-        self.device = device
-        self.settings = settings
-        self.metrics = metrics
-        self.on_session_start = on_session_start
-        self.on_session_complete = on_session_complete
-        self.waiting: list[InvocationSession] = []
-        self.busy = False
-        self._launch_scheduled = False
+class PrefillBatcher:
+    """Form one unbounded greedy batch per idle device without formation wait."""
+
+    def __init__(self, device_ids: tuple[int, ...]) -> None:
+        if not device_ids or len(set(device_ids)) != len(device_ids):
+            raise ValueError("prefill batcher requires unique non-empty device IDs")
+        if any(
+            isinstance(device_id, bool)
+            or not isinstance(device_id, int)
+            or device_id < 0
+            for device_id in device_ids
+        ):
+            raise ValueError("prefill device IDs must be non-negative integers")
+        self.device_ids = device_ids
+        self._waiting: dict[int, deque[PrefillRequest]] = {
+            device_id: deque() for device_id in device_ids
+        }
+        self._next_request_sequence = 0
         self._next_batch_id = 0
+        self._last_enqueue_time_s = 0.0
 
-    def enqueue(self, session: InvocationSession) -> None:
-        session.phase = InvocationPhase.WAITING_PREFILL
-        session.prefill_queued_at = self.engine.now
-        self.waiting.append(session)
-        self.metrics.prefill_queue_changed(self.engine.now, len(self.waiting))
-        self._request_launch()
+    @property
+    def last_enqueue_time_s(self) -> float:
+        return self._last_enqueue_time_s
 
-    def handle_start(self) -> None:
-        self._launch_scheduled = False
-        if self.busy or not self.waiting:
-            return
-        selected = [self.waiting.pop(0)]
-        total_tokens = selected[0].effective_prefill_tokens
-        while self.waiting and len(selected) < self.settings.max_batch_requests:
-            candidate = self.waiting[0]
-            if total_tokens + candidate.effective_prefill_tokens > self.settings.max_batch_tokens:
-                break
-            selected.append(self.waiting.pop(0))
-            total_tokens += candidate.effective_prefill_tokens
-        self.metrics.prefill_queue_changed(self.engine.now, len(self.waiting))
-
-        longest = max(session.effective_prefill_tokens for session in selected)
-        service_time = self.device.fixed_latency + max(
-            longest / self.settings.single_request_tokens_per_second,
-            total_tokens / self.settings.max_system_tokens_per_second,
+    def enqueue(
+        self,
+        session: SessionState,
+        device_id: int,
+        ready_time_s: float,
+    ) -> PrefillRequest:
+        ready = _time(ready_time_s, "ready_time_s")
+        if ready < self._last_enqueue_time_s:
+            raise ValueError("prefill requests must be enqueued in timestamp order")
+        if device_id not in self._waiting:
+            raise ValueError(f"device {device_id} is not a mapped prefill device")
+        episode = session.current_episode
+        if episode is None or episode.phase is not DecodeEpisodePhase.TURN_READY:
+            raise ValueError("prefill enqueue requires a turn-ready episode")
+        if ready < episode.turn_ready_time_s:
+            raise ValueError("prefill enqueue cannot precede turn readiness")
+        if any(
+            request.session is session
+            for queue in self._waiting.values()
+            for request in queue
+        ):
+            raise ValueError("session is already waiting for prefill")
+        request = PrefillRequest(
+            sequence_id=self._next_request_sequence,
+            ready_time_s=ready,
+            device_id=device_id,
+            session=session,
         )
-        reservation = self.device.queue.reserve(self.engine.now, service_time)
-        batch_id = self._next_batch_id
+        self._waiting[device_id].append(request)
+        self._next_request_sequence += 1
+        self._last_enqueue_time_s = ready
+        return request
+
+    def form_batch(
+        self,
+        device_id: int,
+        launch_time_s: float,
+        *,
+        device_available_time_s: float,
+    ) -> PrefillBatch | None:
+        launch = _time(launch_time_s, "launch_time_s")
+        available = _time(device_available_time_s, "device_available_time_s")
+        if device_id not in self._waiting:
+            raise ValueError(f"device {device_id} is not a mapped prefill device")
+        if available > launch:
+            return None
+        queue = self._waiting[device_id]
+        selected: list[PrefillRequest] = []
+        while queue and queue[0].ready_time_s <= launch:
+            selected.append(queue.popleft())
+        if not selected:
+            return None
+        batch = PrefillBatch(
+            batch_id=self._next_batch_id,
+            device_id=device_id,
+            launch_time_s=launch,
+            requests=tuple(selected),
+        )
         self._next_batch_id += 1
-        completion = PrefillBatchCompletion(batch_id, tuple(selected))
-        self.busy = True
-        for session in selected:
-            session.phase = InvocationPhase.PREFILL_RUNNING
-            session.prefill_started_at = self.engine.now
-            queued_at = session.prefill_queued_at if session.prefill_queued_at is not None else self.engine.now
-            self.on_session_start(session, self.engine.now - queued_at, service_time)
-        self.metrics.prefill_batch_started(
-            PrefillBatchMetric(
-                batch_id=batch_id,
-                start_time_s=self.engine.now,
-                finish_time_s=reservation.finish_time,
-                request_count=len(selected),
-                total_tokens=total_tokens,
-                longest_tokens=longest,
-                queue_length_at_start=len(self.waiting),
+        return batch
+
+    def waiting(self, device_id: int | None = None) -> tuple[PrefillRequest, ...]:
+        if device_id is not None:
+            if device_id not in self._waiting:
+                raise ValueError(f"device {device_id} is not a mapped prefill device")
+            return tuple(self._waiting[device_id])
+        return tuple(
+            sorted(
+                (
+                    request
+                    for queue in self._waiting.values()
+                    for request in queue
+                ),
+                key=lambda request: request.sequence_id,
             )
         )
-        self.engine.schedule(reservation.finish_time, EventType.PREFILL_BATCH_FINISH, completion)
-
-    def handle_finish(self, completion: PrefillBatchCompletion) -> None:
-        self.busy = False
-        for session in completion.sessions:
-            session.prefill_finished_at = self.engine.now
-            session.phase = InvocationPhase.WAITING_KV_INGRESS
-            self.on_session_complete(session)
-        self._request_launch()
-
-    def _request_launch(self) -> None:
-        if self.busy or self._launch_scheduled or not self.waiting:
-            return
-        self._launch_scheduled = True
-        self.engine.schedule(self.engine.now, EventType.PREFILL_BATCH_START)

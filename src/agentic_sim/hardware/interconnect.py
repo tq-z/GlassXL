@@ -200,11 +200,33 @@ class KVP2PInterconnect:
         dst: Device,
         ready_time: float,
     ) -> InterconnectReservation:
-        service_time = self.model.latency_s(tokens, src.device_id, dst.device_id)
-        endpoints = (src,) if src.device_id == dst.device_id else (src, dst)
+        return self.submit_batch(tokens, src, (dst,), ready_time)
+
+    def submit_batch(
+        self,
+        tokens: int,
+        src: Device,
+        destinations: Sequence[Device],
+        ready_time: float,
+    ) -> InterconnectReservation:
+        """Charge one P2P startup for one logical multi-destination KV batch."""
+
+        if not destinations:
+            raise ValueError("a KV transfer batch requires at least one destination")
+        service_time = self.model.latency_s(
+            tokens,
+            src.device_id,
+            destinations[0].device_id,
+        )
+        endpoints: list[Device] = [src]
+        seen = {src.device_id}
+        for destination in destinations:
+            if destination.device_id not in seen:
+                endpoints.append(destination)
+                seen.add(destination.device_id)
         return reserve_synchronized(
             self.queue,
-            endpoints,
+            tuple(endpoints),
             DeviceOperation.KV_P2P,
             ready_time,
             service_time,
