@@ -27,13 +27,26 @@ class WorkloadGenerator:
         )
         turns_distribution = distribution_from_config(self.config["turns"])
         input_distribution = distribution_from_config(self.config["input_tokens"])
+        context_distribution = (
+            distribution_from_config(self.config["context_tokens"])
+            if "context_tokens" in self.config
+            else None
+        )
         output_distribution = distribution_from_config(self.config["output_tokens"])
         wait_distribution = distribution_from_config(self.config["tool_wait_ms"])
 
         agents: list[Agent] = []
         for agent_id, arrival_time in enumerate(arrival_times):
             num_turns = max(1, int(round(turns_distribution.sample(self.rng))))
-            inputs = [max(0, int(round(input_distribution.sample(self.rng)))) for _ in range(num_turns)]
+            initial_context_tokens: int | None = None
+            if context_distribution is None:
+                inputs = [max(0, int(round(input_distribution.sample(self.rng)))) for _ in range(num_turns)]
+            else:
+                initial_context_tokens = max(0, int(round(context_distribution.sample(self.rng))))
+                inputs = [0] + [
+                    max(0, int(round(input_distribution.sample(self.rng))))
+                    for _ in range(num_turns - 1)
+                ]
             outputs = [max(0, int(round(output_distribution.sample(self.rng)))) for _ in range(num_turns)]
             waits = [max(0.0, wait_distribution.sample(self.rng) / 1_000.0) for _ in range(num_turns)]
             agents.append(
@@ -46,6 +59,7 @@ class WorkloadGenerator:
                     input_tokens_per_turn=inputs,
                     output_tokens_per_turn=outputs,
                     tool_wait_per_turn=waits,
+                    initial_context_tokens=initial_context_tokens,
                 )
             )
         return agents

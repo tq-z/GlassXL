@@ -1,4 +1,4 @@
-"""Run the PR1--PR3 example and print its in-memory metrics."""
+"""Run the Phase 1.5 example and print its in-memory metrics."""
 
 from __future__ import annotations
 
@@ -13,6 +13,9 @@ def main() -> None:
     config = load_config(repository_root / "configs" / "example.yaml")
     result = Simulation(config).run()
     print(json.dumps(result.summary, indent=2, sort_keys=True))
+    # print("\nAgents:")
+    # for agent in result.agents:
+    #     print(json.dumps(agent.to_dict(), sort_keys=True))
     print("\nResources:")
     for resource in result.resources:
         print(json.dumps(resource.to_dict(), sort_keys=True))

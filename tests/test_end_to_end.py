@@ -38,6 +38,30 @@ def test_tool_wait_and_kv_store_overlap(minimal_config: dict) -> None:
     assert result.summary["average_kv_wait_agents"] > 0.0
 
 
+def test_agent_prefill_time_sums_all_turn_prefill_stages(minimal_config: dict) -> None:
+    config = deepcopy(minimal_config)
+    config["workload"]["num_agents"] = 1
+    result = Simulation(config).run()
+
+    assert [invocation.prefill_time_s for invocation in result.invocations] == pytest.approx([0.21, 0.21])
+    assert result.invocations[0].to_dict()["prefill_time_s"] == pytest.approx(0.21)
+    assert result.agents[0].prefill_time_s == pytest.approx(0.42)
+    assert result.agents[0].to_dict()["prefill_time_s"] == pytest.approx(0.42)
+    assert result.summary["mean_agent_prefill_time_ms"] == pytest.approx(420.0)
+
+
+def test_agent_decode_time_sums_all_turn_decode_stages(minimal_config: dict) -> None:
+    config = deepcopy(minimal_config)
+    config["workload"]["num_agents"] = 1
+    result = Simulation(config).run()
+
+    assert [invocation.decode_time_s for invocation in result.invocations] == pytest.approx([0.21, 0.21])
+    assert result.invocations[0].to_dict()["decode_time_s"] == pytest.approx(0.21)
+    assert result.agents[0].decode_time_s == pytest.approx(0.42)
+    assert result.agents[0].to_dict()["decode_time_s"] == pytest.approx(0.42)
+    assert result.summary["mean_agent_decode_time_ms"] == pytest.approx(420.0)
+
+
 def test_far_memory_selects_far_tier(minimal_config: dict) -> None:
     config = deepcopy(minimal_config)
     config["invocation_model"]["kv"]["retention"] = "far_memory"

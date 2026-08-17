@@ -1,0 +1,40 @@
+I feel the current version of hardware functionality spliting is not good and clean. I don't need legacy comptible. I want to reconstrcut some files. The implemention_plan.md and summary.md also need to be changed.  Let's do the implementation_plan update first. ask me any question if you are not sure. Do the search if needed. I will use other faster model for the implapemetnation later. 
+
+
+Now I want to model the PD and AFD behavior. The device split to prefill, decode_ffn, and decode_attn model. The processing speed can be refiend with other model later, Now I will just give a coarse models. The first style is give the token/s (which is relevant to the functionlity of the functionality).  The decode model FFN will contains two part time (communication(all2all) and compute(GEMM)). communictcation time depends on the interconnection modeling and the compute time depedns on the compute device modeling. THe compute will model as a fcuntion of this bastch (the sum of tokens that need to activate some experts, due to the decode, the number of GeMM size will be 1*batchsize, the batch here is the batch that activate this expert). Regarding the attn model, the batch doesn't help because different task use different context. I will model it as the totoal latency = sum(task_latency in the batch). The task latency will be  the context lenghth divded by a parm .The prefill model contains multiple level of modeling and i will implement the easy one first but left the interface for more compleicated once (depends on the batch size, each task/session's context length and each sessions' prefill length and some compute ablity side parms). THe simple version will use only one sum(prefill_length_i)/throupgut. 
+
+
+
+ALl teh those compute ability parsm will b egiven in unit of token. Let's talk about the interconnection mnodeling. The interconnection contains two model all2all for ffn and p2p for KV migration. the all to all modeling is START_LAT+min(send_size, MIN_PACKAGE_SIZE)/THROUGPUT. This MIN_PACKAGE_SIZE and THROUGPUT will also given in token unit. 
+
+The config for now is not clear. I want to split the HW side workload side and mapping side into three different files. The example yaml should give teh comments for all the possible options if the field is for option. An document for the yaml is also needed. 
+
+
+
+
+ Due to the AFD is layerwise and the PD is the decode step wise, THe simulation modeling should go the layerwise ultimatly. But let's do the decodestep wise first and left the potetion for later. IN the decode step wise, I will assume all layers shares the same expertise mapping. another field of config will give the device-id expertise-id serving mapping(which expertise on which device so when parsing the trace we can know we should move to which device)
+
+ For the runtime modeling, the FFN communication will depedn son the activate sessions and the later goal will parse the trace. But for this stage, let's just assume the data eqaully go all teh node (using ceill, say if the batch size < N_EP, the all to all data at least 1.)
+
+ For the event queeu, I prefer each device contains one queue. Note that the functionality of a specicifcal device_id may larger than one (eg, do FFN and attn on the same same device)
+
+ For the workload generation The context token is to define the context length at some timestamp_t. I don't want to model the cold start time for now. So the content length don't need to be prefilled. We just assume the modeling part start after the session is initally prefilled. 
+
+ For the mapping modeling, I want to have the DP for attn and EP for the FFN.  
+
+
+ When mapping the decodes' attn. due to this decode step and next decode step should be using same device id for the same session, I need consider this as well. For the decode, I assume the two way. The first is at the start time (insert a new sessioin to the batch) it will be added to the device that contains less sum of sessions context. IN this mode, we assume the Decode attn node only contains the activate session and all inactivate sessions are pruned out. The second way is to assume the teh decode attn contains some inactivate sessions. When the new session is added, it will select the device whose activate sessions' sum of context length is the minimal. It will be place to there. In both case, we need to makesure some device's capcity is large enought for activate sessions. In first mode, if we find no more activate session can be added, this new session will be hanged and impact the TTFT time. In the second case, we will use LRU to prune the selected devices' inactivate sessions until the new session can be insert. If all inactivate sessions ahve been removed but not enough capcity for the new session, the new session will hanged. 
+
+
+ 1. max
+2. the dispatach and combine use *2 assume they are same 
+3. FFN traffic will based on the BS*topK consider each expertise need one copy. THe N_EP here is teh EP's parallal. Multiple expertise may on the same node. use another for the number of expertise. Besides, I am also use DP for the attn
+4. lets do as teh all layer summary rates
+5. all attn DP sync together so it looks as one global FFN step. 
+6. after prefill. New KV sent to attn. After decode stage , all send to pool
+7. after full decoded episode. assume overlappeable with tool wait
+8. use the oracle decode token number to check the space.
+9. Yes. assume it is retain there. Also the activate only mode need to transfer whole KV context from p to d node.
+10. yes 
+
+what else is unclaer? 

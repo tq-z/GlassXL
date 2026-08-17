@@ -7,6 +7,7 @@ from enum import Enum
 
 
 class KVRetentionMode(Enum):
+    SAME_DEVICE = "same_device"
     MEMORY = "memory"
     FAR_MEMORY = "far_memory"
     DISCARD = "discard"

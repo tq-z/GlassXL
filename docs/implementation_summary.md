@@ -1,236 +1,453 @@
-# Phase 1 Implementation Summary
+# PD/AFD Simulator Reconstruction Summary
 
 ## Status
 
-Phase 1, corresponding to Pull Requests 1–3 in the implementation plan, is
-complete. The repository contains a deterministic, end-to-end discrete-event
-simulator for synthetic multi-turn agent workloads running on generic
-prefill/decode compute, memory, and latency-plus-bandwidth link resources.
+The repository currently implements the legacy Phase 1/1.5 coarse P-D
+simulator. The new PD/AFD architecture described here and in
+IMPLEMENTATION_PLAN.md is a target design and has not yet been implemented or
+verified.
 
-The implementation deliberately stops before Phase 1 experiment automation and
-all architecture-specific later phases. It provides the framework and reference
-execution path on which those phases can build.
+This is intentionally a breaking reconstruction:
 
-## Implemented scope
+- legacy YAML does not need to load;
+- legacy runtime behavior does not need compatibility shims;
+- existing tests validate only the old simulator;
+- old example metrics are not evidence for the new design;
+- no new performance or test result is claimed in this summary.
 
-The simulator includes:
+The implementation plan was rewritten from the full design conversation on
+2026-08-16. Its Section 17 lists decisions that still require user confirmation
+before a faster implementation model should begin coding.
 
-- a deterministic priority-queue event engine with sequence-ID tie breaking;
-- generic compute, memory, transfer, and wait task abstractions;
-- serial FCFS resource reservation and natural queue buildup;
-- seeded Poisson arrivals and reusable workload distributions;
-- multi-turn agents with context growth and tool waits;
-- coarse prefill/decode disaggregation across separate compute devices;
-- configurable memory, far-memory, or discard KV retention;
-- static task placement onto compute devices, memory resources, and links;
-- request, invocation, resource, queue, throughput, and utilization metrics;
-- configuration validation, an example configuration, and pytest coverage.
+## Existing reusable baseline
 
-## Architecture
+The current source contains infrastructure that may be retained when it still
+matches the new contract:
 
-```text
-YAML configuration
-  -> seeded WorkloadGenerator
-  -> AgenticRuntime
-       -> hardware-independent TaskBuilder
-       -> static ExecutionPolicy
-  -> EventEngine
-  -> SimpleHardwareBackend
-  -> MetricsCollector
-```
+- deterministic timestamp and sequence-ID event ordering;
+- an FCFS resource primitive;
+- seeded synthetic workload distributions;
+- agent/tool-wait lifecycle code;
+- metrics collection patterns.
 
-The event engine owns simulation time but has no agent, model, or hardware
-semantics. The task builder creates logical work and dependencies without
-physical resource IDs. The execution policy maps that work onto the topology,
-and the backend calculates service times and reserves FCFS resources.
+The following current behavior is legacy and may be replaced:
 
-This separation is intentional: later hardware models and scheduling policies
-can replace the simple backend or reference policy without rewriting the event
-engine or synthetic workload generator.
+- one monolithic YAML file;
+- flat or nested generic prefill/decode rates;
+- exactly one static prefill and one static decode device;
+- required distinct P/D device IDs;
+- byte-based ingress and directed links;
+- same_device, memory, far_memory, and discard retention modes;
+- the monolithic continuous-decode rate equation;
+- compatibility fallbacks for old context semantics;
+- tests and documentation tied only to those contracts.
 
-## Workload and agent model
+## Target architecture
 
-The workload generator uses one `random.Random(seed)` stream for every random
-draw. It supports Poisson arrivals plus constant, uniform, exponential,
-lognormal, discrete categorical, and bounded-integer distributions.
+The simulator separates three logical capabilities:
 
-Each agent contains sampled per-turn input tokens, output tokens, and tool-wait
-durations. Context grows after decode by:
+- prefill;
+- decode_attn;
+- decode_ffn.
 
-```text
-new_context = prior_context + input_tokens + output_tokens
-```
+A physical device may implement more than one capability. Every physical device
+owns exactly one execution queue, so all work mapped to that device contends for
+the same resource.
 
-The agent state machine is:
+The global deterministic event calendar is retained. The one-queue-per-device
+rule means one physical service queue shared by all capabilities on that
+device; it does not mean one independent event calendar per device. FCFS queue
+discipline remains a proposed default.
 
-```text
-NOT_ARRIVED
-  -> READY
-  -> RUNNING
-  -> TOOL_WAIT
-  -> optional KV_WAIT
-  -> READY for the next turn
-  -> FINISHED after the final decode
-```
+Configuration is confirmed to split hardware, workload, and mapping into
+three files. The proposed public names and ownership are:
 
-`KV_WAIT` occurs when the tool returns before background KV storage finishes.
+- hardware.yaml: devices, capabilities, attention KV capacity, KV pool,
+  interconnects, and analytical model parameters;
+- workload.yaml: seed, horizon, arrivals, warm context, incremental prefill,
+  requested output, turns, and tool waits;
+- mapping.yaml: model shape, role placement, attention DP, FFN EP, expert
+  ownership, and placement/residency policies.
 
-## Coarse prefill/decode model
+The filenames, exact CLI, model-shape ownership, and structural versus explicit
+PD/AFD selection remain open.
 
-Each generic compute device declares both:
+Implementation must also provide fully commented example YAML files and
+docs/configuration.md covering every field, option, unit, default, equation,
+and cross-file constraint.
 
-- `prefill_tokens_per_second`;
-- `decode_tokens_per_second`.
+All initial compute rates, transfer rates, payloads, and capacities use
+token-equivalent units. Internal time uses seconds.
 
-The static reference policy maps prefill and decode to distinct devices with
-independent FCFS queues. Compute service times are:
+## Simulation granularity
 
-```text
-T_prefill = fixed_latency + prefill_tokens / prefill_tokens_per_second
-T_decode  = fixed_latency + output_tokens / decode_tokens_per_second
-```
+V1 is decode-step-wise. One completed logical step emits one token for every
+active session.
 
-The implementation uses one lumped task per phase. It does not simulate
-individual decode tokens, Transformer layers, xPU/NMP internals, batching, or
-compute/memory overlap inside a device.
+All layers use one common expert mapping. The decode_attn and decode_ffn rates
+are whole-model, all-layer summary rates, and V1 applies attention, dispatch,
+FFN, and combine once per decode step. num_layers does not multiply V1 latency
+or traffic.
 
-## KV retention model
+Analytical inputs still carry an optional layer ID or equivalent stage context
+so a later layer-wise scheduler can reuse the same configuration, mapping,
+devices, and latency-model interfaces. Layer-wise execution, trace-derived
+expert routing, and detailed hardware models are not part of V1.
 
-KV size is controlled by `invocation_model.kv.bytes_per_token`. Let
-`prior_context` be all tokens completed before a turn:
+## Workload semantics
 
-```text
-P-to-D bytes = (prior_context + input_tokens) * kv_bytes_per_token
-stored bytes = (prior_context + input_tokens + output_tokens) * kv_bytes_per_token
-restore bytes = prior_context * kv_bytes_per_token
-```
+context_tokens is the complete context already established at timestamp t. The
+initial cold-start prefill is excluded.
 
-The global retention mode selects one of three behaviors.
+prefill_tokens is newly arrived input that needs later prefill computation.
 
-### Memory or far-memory retention
+output_tokens is the exact oracle length generated by decode and used for
+attention-capacity admission.
 
-The first turn runs:
+For a later turn:
 
-```text
-prefill new input -> transfer prompt KV P-to-D -> decode
-```
+~~~text
+context_after_prefill = context_before_prefill + prefill_tokens
+context_after_decode = context_after_prefill + output_tokens
+~~~
 
-A later turn runs:
+Every emitted output token increases context before the next attention
+calculation.
 
-```text
-memory read
-  -> restore prior KV to prefill device
-  -> prefill new input only
-  -> transfer the updated prompt KV P-to-D
-  -> decode
-```
+The initial location of the warm KV copy still needs confirmation: attention,
+KV pool, stateful prefill, or a combination. It is also open whether the first
+observed session may carry nonzero prefill_tokens in addition to warm context.
 
-After a non-final decode, the runtime forks two concurrent branches:
+## Coarse prefill model
 
-```text
-branch 1: tool wait
-branch 2: transfer final KV D-to-tier -> memory write
-```
+The prefill latency API receives the batch size and every session's context and
+incremental prefill length. The simple compute model is:
 
-The next invocation is released only after both branches complete. Invocation
-completion time remains decode completion; background storage is included in
-agent and resource accounting but excluded from invocation service and queueing
-metrics.
+~~~text
+T_prefill_compute =
+    sum(prefill_tokens_i) / prefill_tokens_per_second
+~~~
 
-`memory` and `far_memory` use identical generic task semantics. Their behavior
-differs only through the selected resource's bandwidth/latency and its directed
-links.
+Prefill supports two modes:
 
-### Discard retention
+- stateful: retain per-session prefill KV and later load only state missing from
+  that retained copy;
+- stateless: load the full existing context before each prefill and discard the
+  transient copy after attention synchronization.
 
-No memory read, write, store, or restore tasks are created. A later turn
-recomputes the accumulated prompt:
+After prefill, KV is sent to the selected attention device; V1 adds no separate
+prefill-to-pool write. Transfer payload depends on attention residency:
 
-```text
-prefill prior context + new input -> transfer prompt KV P-to-D -> decode
-```
+- active_only transfers the full updated context C + P;
+- an LRU cache hit transfers only the newly produced P to the same cached
+  attention device;
+- an LRU miss is proposed to transfer the full updated context C + P.
 
-## Hardware and placement assumptions
+The working stateful interpretation loads decode KV created since the previous
+prefill synchronization, computes P, retains the updated prefill copy, and then
+performs the required attention transfer. The working stateless interpretation
+loads full C, computes P, keeps transient C + P until attention transfer
+finishes, and then discards it.
 
-- Prefill and decode device IDs must be distinct.
-- Every run requires a direct P-to-D link or a configured default link.
-- A retained mode additionally requires D-to-selected-memory and
-  selected-memory-to-P links.
-- Compute, memory, and links are independently serialized FCFS resources.
-- Link transfers use fixed latency plus bytes divided by bandwidth.
-- Memory operations use fixed latency plus bytes divided by bandwidth.
-- Memory capacity is descriptive; aggregate allocation, eviction, and
-  oversubscription are not modeled.
-- Stored KV is treated as residing exclusively in the selected tier until it is
-  restored.
-- Final-turn KV is not stored because no later turn consumes it.
+KV load and P-to-D throughput are separate from prefill compute throughput.
+The exact stateful delta source, direction-specific rates, overlap,
+stateful-copy capacity, attention-admission ordering, prefill placement, and
+batching policy remain open.
 
-## Metrics
+## Decode attention model
 
-Completed-agent metrics include arrival/start/finish time, latency, summed
-hardware service time, tool-wait time, summed queueing delay, turns, and final
-context size. Invocation completion is measured at decode completion.
+For session i with current context C_i on attention device d:
 
-Resource metrics include busy time, utilization, maximum FCFS queue length,
-and processed bytes. System metrics include throughput, latency percentiles,
-offered/completed load, aggregate utilization, average active agents, average
-tool-wait agents, and average KV-wait agents.
+~~~text
+T_attn_task(i, d) =
+    C_i / attention_context_tokens_per_second(d)
+~~~
 
-Utilization and bytes are clipped to the simulation horizon. If all agents
-finish before `simulation_end_s`, the final agent event determines the measured
-makespan.
+Batching provides no modeled attention speedup. Therefore:
 
-## Example result
+~~~text
+T_attn(d) =
+    sum(T_attn_task(i, d) for sessions assigned to d)
+~~~
 
-The checked-in memory-retention example uses seed 7, a 1000-second horizon,
-6000 possible agents, and a 0.1-agent/s Poisson rate. At the horizon, 96 agents
-had arrived and completed; remaining generated arrivals were scheduled later.
+Attention is data-parallel. A session remains on the same attention device
+through every decode step in its current decode episode.
 
-The verified run produced:
+## Attention placement
 
-| Metric | Value |
-|---|---:|
-| Simulation horizon | 1000 s |
-| Offered / completed agents | 96 / 96 |
-| Agent throughput | 0.096 agents/s |
-| Invocation throughput | 0.221 invocations/s |
-| Mean latency | 165.04 ms |
-| p50 / p95 / p99 latency | 144.87 / 259.42 / 290.70 ms |
-| Prefill-device utilization | 0.3444% |
-| Decode-device utilization | 0.5292% |
-| Selected-memory utilization | 0.0091% |
-| P-to-D KV bytes | 951,803,904 |
-| Memory read/write bytes | 888,193,024 |
-| Maximum compute queue | 1 |
+Two placement policies are required:
 
-Storage finishes within the example's sampled tool waits, so its average
-KV-wait count is zero. A dedicated slower-storage test exercises `KV_WAIT` and
-verifies that storage overlaps, rather than serializes with, tool wait.
+- round_robin;
+- least_active_context.
 
-## Verification
+For least_active_context:
 
-The Phase 1 suite contains 30 passing tests covering:
+1. Filter to devices that can admit the new session.
+2. Compute the sum of current context lengths for active sessions on each
+   feasible device.
+3. Select the smallest sum.
+4. Wait if no device is feasible.
 
-- event ordering, deterministic ties, horizons, and dependency enforcement;
-- FCFS reservations, queueing, and utilization;
-- deterministic arrivals and supported distributions;
-- multi-turn state, tool waits, and context growth;
-- exact prefill/decode and memory/link service equations;
-- first-turn, retained-turn, and discard task graphs and byte formulas;
-- memory/far-memory placement and required-resource/link validation;
-- tool-wait/KV-store fork-and-join behavior and `KV_WAIT`;
-- deterministic end-to-end results and queue buildup under load.
+Device ID is the proposed deterministic tie-break, not yet a confirmed rule.
 
-Run verification with:
+The proposed round-robin rule scans cyclically for the first feasible device
+and advances its cursor only after successful admission. This detail still
+needs confirmation.
 
-```bash
-.venv/bin/pytest
-.venv/bin/python examples/run_simulation.py
-```
+## Attention KV capacity and residency
 
-## Deferred work
+Every decode-attention device has KV capacity in tokens. Admission uses oracle
+decode length, superseding the earlier max(context, 64K) estimate:
 
-Phase 1 does not include experiment sweeps or persistent result export from PR4,
-xPU/NMP-specific analytical models, MoE, optimized scheduling, detailed KV
-capacity/eviction/migration, passive optical fabric modeling, trace input, or
-ASTRA-Sim integration.
+~~~text
+required_final_kv =
+    context_at_decode_start + oracle_output_tokens
+~~~
+
+context_at_decode_start includes the current turn's prefill tokens. Actual
+context grows by one on every step while remaining oracle output falls by one,
+so the committed final footprint does not grow during the episode.
+
+If no eligible attention device can fit that commitment, the session enters
+WAITING_ATTN_CAPACITY. That delay contributes to TTFT. Active sessions are
+pinned and cannot be evicted.
+
+PROPOSED metric boundary:
+
+~~~text
+TTFT = first emitted-token completion time - turn_ready_time
+~~~
+
+Initial turn_ready_time is arrival; later turn_ready_time is when new input is
+ready, before prefill, placement, capacity, or KV-transfer wait.
+
+Two residency modes are required:
+
+- active_only: retain no clean inactive attention cache and transfer full
+  current context P-to-D before the next decode episode;
+- lru_cache: retain inactive KV, preserve its device affinity across turns, and
+  prune inactive entries in LRU order when capacity is needed.
+
+An LRU hit reuses the cached attention device and transfers only P. Eviction
+clears cached affinity and later requires a full-context transfer.
+
+Placement/residency composition, active_only logical affinity, behavior when an
+LRU-affined device cannot fit a later oracle commitment, exact LRU ordering,
+and dirty-entry feasibility remain open.
+
+## KV pool and inactive residency
+
+KV is transferred to the pool once after the complete decode episode, not after
+each token. The transfer has modeled cost and may overlap tool wait.
+
+The proposed residency states are:
+
+~~~text
+ACTIVE
+  -> DRAINING_DIRTY
+  -> INACTIVE_CLEAN
+  -> EVICTED
+~~~
+
+- ACTIVE KV is pinned.
+- DRAINING_DIRTY is a transient, capacity-pinned copy waiting for its
+  episode-end pool transfer; it is not reusable inactive cache.
+- INACTIVE_CLEAN has a recoverable current pool copy and may remain cached.
+- EVICTED has no attention-device copy and later needs a full transfer.
+
+The exact pool payload is still ambiguous: all unsynchronized P + O or the
+complete final context. P + O reduces to O when P = 0; a general O-only write
+cannot make the pool current because P is not written there after prefill.
+
+It also remains open whether the next turn joins both tool return and pool
+completion, whether dirty entries are evictable, whether clean eviction is free
+after the episode write, and whether active_only remains capacity-pinned until
+that write completes.
+
+## Decode FFN and AFD behavior
+
+Decode attention is data-parallel and FFN is expert-parallel. All attention DP
+replicas synchronize and contribute to one global FFN step.
+
+For global active batch B:
+
+~~~text
+A = B * top_k
+N_EP = number of FFN EP ranks/devices
+send_tokens = max(1, ceil(A / N_EP))
+~~~
+
+A is the total number of routed expert-activation copies. N_EP is separate from
+num_experts, and several experts may reside on one EP device.
+
+Expert compute receives explicit per-expert activation counts:
+
+~~~text
+expert_id -> expert_batch_tokens
+~~~
+
+The simple model is:
+
+~~~text
+T_expert(e, d) =
+    expert_batch_tokens / expert_tokens_per_second(d)
+~~~
+
+Each expert GEMM is conceptually 1 x expert_batch_tokens. The equal
+communication floor must not fabricate compute activations; expert loads must
+sum to A.
+
+The confirmed synchronous step is:
+
+~~~text
+attention on all DP devices
+  -> global attention barrier
+  -> dispatch all-to-all
+  -> expert GEMMs on EP devices
+  -> global FFN barrier
+  -> identical combine all-to-all
+  -> emit one token per active session
+  -> increment context
+~~~
+
+Proposed ownership keeps scheduling, KV, token order, and sampling on the
+attention side and treats FFN as a stateless expert service. Co-located traffic,
+per-expert equal-load splitting, multi-expert device-job atomicity, and expert
+replication remain open.
+
+## Interconnect models
+
+Two logical traffic classes are required:
+
+- all-to-all for AFD FFN dispatch/combine;
+- P2P for KV migration and synchronization.
+
+The confirmed one-collective all-to-all equation is:
+
+~~~text
+T_one_all_to_all =
+    START_LAT
+  + max(send_tokens, MIN_PACKAGE_TOKENS) / THROUGHPUT
+~~~
+
+Dispatch and combine are identical:
+
+~~~text
+T_ffn_communication = 2 * T_one_all_to_all
+~~~
+
+The proposed P2P model remains:
+
+~~~text
+T_p2p =
+    START_LAT + kv_tokens / THROUGHPUT
+~~~
+
+The P2P minimum-package rule, startup aggregation, resource contention, and its
+relationship to KV-pool load/offload are not yet confirmed.
+
+## Queues and barriers
+
+Confirmed behavior:
+
+- one global deterministic event calendar;
+- one physical service queue per device, shared by all its capabilities;
+- a session keeps one attention device throughout an episode;
+- an LRU-cached session keeps that device across inactive turns until eviction;
+- all attention DP devices synchronize before one global FFN step;
+- dispatch, FFN compute, combine, and token completion occur in that order.
+
+Still proposed are FCFS discipline, independently queued all-to-all/P2P/pool
+resources, and transfers that do not also occupy endpoint compute queues.
+
+## Decisions still required
+
+The main compute pipeline is now frozen. Before implementation, these remaining
+contracts still need answers:
+
+1. For co-located or partially co-located attention/FFN groups, which activation
+   traffic is charged?
+2. How is A = B * top_k divided across experts, how do multiple expert GEMMs on
+   one device execute, is expert replication excluded, and does attention own
+   scheduling/KV/sampling while FFN remains stateless?
+3. What is the exact P2P equation and startup granularity? Do communication
+   operations occupy endpoint queues, and do pool load/offload share a queue
+   while using direction-specific rates?
+4. Does the episode-end pool write contain unsynchronized P + O or the full
+   final context?
+5. Must the next turn join pool completion with tool return? Are dirty entries
+   non-evictable, clean eviction free, active_only capacity pinned until clean,
+   and the V1 pool unbounded?
+6. For stateful prefill, what exact delta is loaded and from where? How are
+   retained-copy capacity, stage overlap, batching, placement, prefill-before-
+   admission ordering, and blocked transient stateless copies handled?
+7. Where are warm initial KV copies, may the first observed turn have nonzero P,
+   and may workloads pre-populate inactive attention-cache entries?
+8. Does active_only rerun attention placement each episode? If an LRU-affined
+   device cannot fit a later oracle commitment, may the session migrate?
+9. Confirm oracle-commitment lifetime, round-robin scanning, tie-breaking,
+   policy composition, and LRU timestamp refresh.
+10. Confirm FCFS, YAML ownership/names, structural PD/AFD inference, the CLI,
+    and the TTFT boundary.
+
+The authoritative question-by-question checklist is Section 17 of
+IMPLEMENTATION_PLAN.md. None of these choices should be silently inferred.
+
+## Implementation impact
+
+The reconstruction is expected to:
+
+- replace src/agentic_sim/config.py with typed three-file configuration modules;
+- rewrite the physical Device and Topology abstractions;
+- add replaceable compute, interconnect, and KV-pool models;
+- add explicit mapping components for prefill, attention admission, residency,
+  and expert ownership;
+- replace the legacy prefill/decode/ingress controllers;
+- replace metadata-driven legacy task placement with typed stage work;
+- adapt workload, metrics, simulation assembly, examples, README, and the
+  metrics reference;
+- delete compatibility-only code and tests after migration.
+
+The detailed source map and seven implementation milestones are in
+IMPLEMENTATION_PLAN.md.
+
+## Verification status
+
+No target implementation test has been run because the reconstruction has not
+been implemented.
+
+Prior legacy test-count and performance-result claims have intentionally been
+removed from this target-design summary.
+
+The new implementation must verify:
+
+- strict three-file loading and legacy rejection;
+- exact analytical equations;
+- one shared queue across co-located capabilities;
+- warm-start context semantics;
+- stateful/stateless prefill;
+- sticky capacity-aware attention placement;
+- round-robin and least-active-context policies;
+- active-only and LRU residency;
+- KV-pool dirty/clean/evicted transitions;
+- AFD dispatch, expert compute, and combine;
+- expert mapping and equal-routing edge cases;
+- deterministic end-to-end multi-turn execution;
+- token conservation and no KV-capacity overflow;
+- a layer-wise compatibility seam.
+
+## Immediate handoff
+
+Do not begin implementation by preserving or extending the old PR4 controller
+interfaces.
+
+First resolve every open item in Section 17 of IMPLEMENTATION_PLAN.md. Then
+execute its milestones in order:
+
+1. typed three-file configuration;
+2. hardware and analytical primitives;
+3. workload, session, and KV-state primitives;
+4. attention admission and residency;
+5. stateful/stateless prefill;
+6. step-wise PD/AFD decode and output flush;
+7. metrics, cleanup, documentation, and verified results.

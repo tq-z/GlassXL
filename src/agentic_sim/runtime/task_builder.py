@@ -1,4 +1,4 @@
-"""Map invocations to hardware-independent coarse P-D task graphs."""
+"""Map invocations to hardware-independent coarse P-D tasks."""
 
 from __future__ import annotations
 
@@ -21,50 +21,61 @@ class TaskBuilder:
     def retains_kv(self) -> bool:
         return self.retention is not KVRetentionMode.DISCARD
 
-    def build(self, invocation: Invocation) -> list[Task]:
-        tasks: list[Task] = []
-        dependency: list[int] = []
-        if self.retains_kv and invocation.context_tokens > 0:
-            restore_bytes = invocation.context_tokens * self.kv_bytes_per_token
-            memory_read = MemoryTask(
-                task_id=self._take_task_id(),
-                agent_id=invocation.agent_id,
-                invocation_id=invocation.invocation_id,
-                metadata={"bytes": restore_bytes, "operation": "read"},
-            )
-            restore = TransferTask(
-                task_id=self._take_task_id(),
-                agent_id=invocation.agent_id,
-                invocation_id=invocation.invocation_id,
-                dependencies=[memory_read.task_id],
-                metadata={"bytes": restore_bytes, "direction": "restore"},
-            )
-            tasks.extend((memory_read, restore))
-            dependency = [restore.task_id]
+    @property
+    def uses_memory_tier(self) -> bool:
+        return self.retention in {KVRetentionMode.MEMORY, KVRetentionMode.FAR_MEMORY}
 
-        prefill_tokens = (
-            invocation.input_tokens
-            if self.retains_kv
-            else invocation.context_tokens + invocation.input_tokens
+    def effective_prefill_tokens(self, invocation: Invocation) -> int:
+        return invocation.input_tokens if self.retains_kv else invocation.context_tokens + invocation.input_tokens
+
+    def prompt_kv_bytes(self, invocation: Invocation) -> int:
+        return (invocation.context_tokens + invocation.input_tokens) * self.kv_bytes_per_token
+
+    def build_restore(self, invocation: Invocation) -> list[Task]:
+        if not self.uses_memory_tier or invocation.context_tokens == 0:
+            return []
+        restore_bytes = invocation.context_tokens * self.kv_bytes_per_token
+        memory_read = MemoryTask(
+            task_id=self._take_task_id(),
+            agent_id=invocation.agent_id,
+            invocation_id=invocation.invocation_id,
+            metadata={"bytes": restore_bytes, "operation": "read"},
         )
+        restore = TransferTask(
+            task_id=self._take_task_id(),
+            agent_id=invocation.agent_id,
+            invocation_id=invocation.invocation_id,
+            dependencies=[memory_read.task_id],
+            metadata={"bytes": restore_bytes, "direction": "restore"},
+        )
+        return [memory_read, restore]
+
+    def build_ingress(self, invocation: Invocation) -> list[Task]:
+        """Build the legacy independently queued direct-link ingress task."""
+
+        return [
+            TransferTask(
+                task_id=self._take_task_id(),
+                agent_id=invocation.agent_id,
+                invocation_id=invocation.invocation_id,
+                metadata={"bytes": self.prompt_kv_bytes(invocation), "direction": "prefill_to_decode"},
+            )
+        ]
+
+    def build(self, invocation: Invocation) -> list[Task]:
+        """Retain the Phase 1 serial graph API for downstream compatibility."""
+
+        tasks = self.build_restore(invocation)
+        dependency = [tasks[-1].task_id] if tasks else []
         prefill = ComputeTask(
             task_id=self._take_task_id(),
             agent_id=invocation.agent_id,
             invocation_id=invocation.invocation_id,
             dependencies=dependency,
-            metadata={"phase": ComputePhase.PREFILL, "tokens": prefill_tokens},
+            metadata={"phase": ComputePhase.PREFILL, "tokens": self.effective_prefill_tokens(invocation)},
         )
-        prompt_tokens = invocation.context_tokens + invocation.input_tokens
-        pd_transfer = TransferTask(
-            task_id=self._take_task_id(),
-            agent_id=invocation.agent_id,
-            invocation_id=invocation.invocation_id,
-            dependencies=[prefill.task_id],
-            metadata={
-                "bytes": prompt_tokens * self.kv_bytes_per_token,
-                "direction": "prefill_to_decode",
-            },
-        )
+        pd_transfer = self.build_ingress(invocation)[0]
+        pd_transfer.dependencies = [prefill.task_id]
         decode = ComputeTask(
             task_id=self._take_task_id(),
             agent_id=invocation.agent_id,
@@ -75,13 +86,8 @@ class TaskBuilder:
         tasks.extend((prefill, pd_transfer, decode))
         return tasks
 
-    def build_store(
-        self,
-        agent_id: int,
-        invocation_id: int,
-        context_tokens: int,
-    ) -> list[Task]:
-        if not self.retains_kv:
+    def build_store(self, agent_id: int, invocation_id: int, context_tokens: int) -> list[Task]:
+        if not self.uses_memory_tier:
             return []
         byte_count = context_tokens * self.kv_bytes_per_token
         transfer = TransferTask(

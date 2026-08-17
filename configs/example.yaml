@@ -1,18 +1,29 @@
 seed: 7
-simulation_end_s: 1000
+simulation_end_s: 10000
 
 hardware:
   devices:
     - id: 0
       class: compute
-      prefill_tokens_per_second: 18000
-      decode_tokens_per_second: 2500
       fixed_latency_us: 5
+      prefill:
+        single_request_tokens_per_second: 18000
+        max_system_tokens_per_second: 72000
+        max_batch_requests: 1024
+        max_batch_tokens: 6553600
+        layout: packed
+        batch_wait_us: 0
     - id: 1
       class: compute
-      prefill_tokens_per_second: 12000
-      decode_tokens_per_second: 3000
       fixed_latency_us: 5
+      decode:
+        single_session_tokens_per_second: 50
+        max_system_tokens_per_second: 2500
+        max_active_sessions: 256
+  kv_ingress:
+    fixed_latency_us: 2
+    per_session_max_bandwidth_bytes_per_sec: 2.0e11
+    max_system_bandwidth_bytes_per_sec: 8.0e11
   memories:
     - id: 2
       capacity_bytes: 17179869184
@@ -23,10 +34,6 @@ hardware:
       bandwidth_bytes_per_sec: 2.0e9
       fixed_latency_us: 100
   links:
-    - src: 0
-      dst: 1
-      bandwidth_gbps: 100
-      fixed_latency_us: 2
     - src: 1
       dst: 2
       bandwidth_gbps: 100
@@ -45,22 +52,26 @@ hardware:
       fixed_latency_us: 20
 
 workload:
-  num_agents: 6000
+  num_agents: 600
   arrival:
     type: poisson
     rate_per_second: 0.1
   turns:
     type: discrete
-    values: [2, 3]
+    values: [12, 13]
     probabilities: [0.7, 0.3]
+  context_tokens:
+    type: bounded_integer
+    min: 1920
+    max: 3840
   input_tokens:
     type: bounded_integer
-    min: 192
-    max: 384
+    min: 1920
+    max: 3840
   output_tokens:
     type: bounded_integer
-    min: 48
-    max: 96
+    min: 480
+    max: 960
   tool_wait_ms:
     type: lognormal
     mean: 4.0
