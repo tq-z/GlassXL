@@ -27,6 +27,7 @@ class SessionStatus(StrEnum):
     NOT_ARRIVED = "not_arrived"
     IDLE = "idle"
     EPISODE_ACTIVE = "episode_active"
+    WAITING_ATTN_CAPACITY = "waiting_attn_capacity"
     FINISHED = "finished"
 
 
@@ -34,6 +35,7 @@ class DecodeEpisodePhase(StrEnum):
     TURN_READY = "turn_ready"
     PREFILL_READY = "prefill_ready"
     PREFILLED = "prefilled"
+    WAITING_ATTN_CAPACITY = "waiting_attn_capacity"
     ACTIVE = "active"
     DRAINING_DIRTY = "draining_dirty"
     POOL_SYNCED = "pool_synced"
@@ -130,6 +132,23 @@ class AttentionKVState:
         self.state = AttentionKVResidency.ACTIVE
         self.device_id = device_id
         self.snapshot = current
+
+    def restore_tokens(self, current: KVSnapshot) -> int:
+        """Return the KV payload needed to restore the current attention copy."""
+
+        if self.state is AttentionKVResidency.EVICTED:
+            return current.context_tokens
+        if self.state is not AttentionKVResidency.INACTIVE_CLEAN:
+            raise ValueError("attention restore requires clean inactive or evicted KV")
+        if self.snapshot is None:
+            raise ValueError("clean inactive attention KV requires a snapshot")
+        version_delta = current.version - self.snapshot.version
+        token_delta = current.context_tokens - self.snapshot.context_tokens
+        if version_delta < 0 or token_delta != version_delta:
+            raise ValueError(
+                "attention restore requires monotonic matching token/version deltas"
+            )
+        return token_delta
 
     def record_decode_token(self, current: KVSnapshot, completion_time_s: float) -> None:
         if self.state is not AttentionKVResidency.ACTIVE:
@@ -266,6 +285,11 @@ class DecodeEpisodeState:
     generated_tokens: int = 0
     pool_write_tokens: int | None = None
     token_completion_times_s: list[float] = field(default_factory=list)
+    capacity_wait_started_s: float | None = None
+    attention_capacity_wait_s: float = 0.0
+    attention_admitted_time_s: float | None = None
+    attention_transfer_tokens: int | None = None
+    attention_cache_hit: bool | None = None
 
     def __post_init__(self) -> None:
         _time(self.turn_ready_time_s, "turn_ready_time_s")
@@ -280,6 +304,12 @@ class DecodeEpisodeState:
         if self.context_at_decode_start is None:
             raise ValueError("decode has not started")
         return self.context_at_decode_start + self.turn.output_tokens
+
+    @property
+    def ttft_s(self) -> float:
+        if not self.token_completion_times_s:
+            raise ValueError("TTFT is unavailable before the first token completes")
+        return self.token_completion_times_s[0] - self.turn_ready_time_s
 
 
 @dataclass
@@ -348,17 +378,69 @@ class SessionState:
         episode.phase = DecodeEpisodePhase.PREFILLED
         return episode.turn.prefill_tokens
 
-    def activate_attention(self, device_id: int) -> None:
+    def begin_attention_capacity_wait(self, wait_started_s: float) -> None:
         episode = self._episode_in(DecodeEpisodePhase.PREFILLED)
+        started = _time(wait_started_s, "wait_started_s")
+        if started < episode.turn_ready_time_s:
+            raise ValueError("attention capacity wait cannot precede turn readiness")
+        episode.capacity_wait_started_s = started
+        episode.phase = DecodeEpisodePhase.WAITING_ATTN_CAPACITY
+        self.status = SessionStatus.WAITING_ATTN_CAPACITY
+
+    def activate_attention(
+        self,
+        device_id: int,
+        *,
+        admission_time_s: float | None = None,
+        transfer_tokens: int | None = None,
+        cache_hit: bool | None = None,
+    ) -> None:
+        if self.current_episode is None:
+            raise ValueError("session has no active episode")
+        episode = self.current_episode
+        if episode.phase not in {
+            DecodeEpisodePhase.PREFILLED,
+            DecodeEpisodePhase.WAITING_ATTN_CAPACITY,
+        }:
+            raise ValueError(
+                "episode phase must be prefilled or waiting_attn_capacity, "
+                f"got {episode.phase.value}"
+            )
+        admitted = (
+            _time(admission_time_s, "admission_time_s")
+            if admission_time_s is not None
+            else None
+        )
+        if episode.phase is DecodeEpisodePhase.WAITING_ATTN_CAPACITY:
+            if admitted is None or episode.capacity_wait_started_s is None:
+                raise ValueError("capacity-waiting admission requires an admission time")
+            if admitted < episode.capacity_wait_started_s:
+                raise ValueError("admission cannot precede the capacity wait")
+            episode.attention_capacity_wait_s = (
+                admitted - episode.capacity_wait_started_s
+            )
+        if admitted is not None and admitted < episode.turn_ready_time_s:
+            raise ValueError("attention admission cannot precede turn readiness")
+        if transfer_tokens is not None:
+            _nonnegative_integer(transfer_tokens, "transfer_tokens")
         self.kv.attention.activate(device_id, self.kv.current_snapshot)
         episode.context_at_decode_start = self.current_context_tokens
+        episode.attention_admitted_time_s = admitted
+        episode.attention_transfer_tokens = transfer_tokens
+        episode.attention_cache_hit = cache_hit
         episode.phase = DecodeEpisodePhase.ACTIVE
+        self.status = SessionStatus.EPISODE_ACTIVE
 
     def emit_decode_token(self, completion_time_s: float) -> int:
         episode = self._episode_in(DecodeEpisodePhase.ACTIVE)
         if episode.remaining_output_tokens <= 0:
             raise ValueError("decode episode has already emitted its oracle output")
         completion = _time(completion_time_s, "completion_time_s")
+        if (
+            episode.attention_admitted_time_s is not None
+            and completion < episode.attention_admitted_time_s
+        ):
+            raise ValueError("decode completion cannot precede attention admission")
         last_access = self.kv.attention.last_access_time_s
         if last_access is not None and completion < last_access:
             raise ValueError("decode completion times must be monotonic")
