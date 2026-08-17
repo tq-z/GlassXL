@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 
 
@@ -24,10 +25,19 @@ class FCFSResource:
         self.queue_samples: list[tuple[float, int]] = [(0.0, 0)]
         self.max_queue_length = 0
 
-    def reserve(self, ready_time: float, service_time: float) -> Reservation:
-        if ready_time < 0.0 or service_time < 0.0:
-            raise ValueError("ready time and service time must be non-negative")
-        start_time = max(ready_time, self.available_time)
+    def reserve(
+        self,
+        ready_time: float,
+        service_time: float,
+        *,
+        earliest_start: float | None = None,
+    ) -> Reservation:
+        values = (ready_time, service_time) if earliest_start is None else (ready_time, service_time, earliest_start)
+        if any(not math.isfinite(value) or value < 0.0 for value in values):
+            raise ValueError("ready time, service time, and earliest start must be finite and non-negative")
+        if earliest_start is not None and earliest_start < ready_time:
+            raise ValueError("earliest start cannot precede ready time")
+        start_time = max(ready_time, self.available_time, earliest_start or 0.0)
         finish_time = start_time + service_time
         reservation = Reservation(
             resource_id=self.resource_id,
