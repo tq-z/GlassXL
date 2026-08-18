@@ -1,6 +1,6 @@
 # V1 configuration reference
 
-Milestone 1 replaces the legacy single-file configuration with three required,
+V1 replaces the legacy single-file configuration with three required,
 independently parsed YAML files:
 
 - `hardware.yaml` describes physical resources and calibrated service models.
@@ -62,7 +62,7 @@ not overlap.
 | YAML path | Type | Req. | Default | Unit | Allowed / validation | Equation or runtime effect and relationships |
 |---|---|---:|---|---|---|---|
 | `devices[].capabilities.prefill` | mapping | conditional | — | — | required to map the device for prefill | Selects the prefill service model. |
-| `...prefill.model` | string | yes | — | — | `aggregate_throughput` | Milestone 2 uses the aggregate model interface. |
+| `...prefill.model` | string | yes | — | — | `aggregate_throughput` | V1 uses the aggregate model interface. |
 | `...prefill.tokens_per_second` | number | yes | — | tokens/s | finite and > 0 | For batch B, `T = sum(P_i) / rate`. Context and batch metadata remain model inputs. |
 
 ### Decode-attention capability
@@ -70,7 +70,7 @@ not overlap.
 | YAML path | Type | Req. | Default | Unit | Allowed / validation | Equation or runtime effect and relationships |
 |---|---|---:|---|---|---|---|
 | `devices[].capabilities.decode_attn` | mapping | conditional | — | — | required to map the device for attention | Selects the attention service model and resident-KV budget. |
-| `...decode_attn.model` | string | yes | — | — | `linear_context` | Milestone 2 uses the linear context interface. |
+| `...decode_attn.model` | string | yes | — | — | `linear_context` | V1 uses the linear context interface. |
 | `...decode_attn.context_tokens_per_second` | number | yes | — | context tokens/s | finite and > 0 | For local batch B, `T = sum(C_i / rate)`. |
 | `...decode_attn.kv_capacity_tokens` | integer | yes | — | tokens | >= 0 | Bounds active, draining, and cached attention KV under later admission logic. |
 
@@ -79,7 +79,7 @@ not overlap.
 | YAML path | Type | Req. | Default | Unit | Allowed / validation | Equation or runtime effect and relationships |
 |---|---|---:|---|---|---|---|
 | `devices[].capabilities.decode_ffn` | mapping | conditional | — | — | required to map the device for FFN | Selects the expert-compute service model. |
-| `...decode_ffn.model` | string | yes | — | — | `linear_expert_batch` | Milestone 2 uses the per-device expert-work interface. |
+| `...decode_ffn.model` | string | yes | — | — | `linear_expert_batch` | V1 uses the per-device expert-work interface. |
 | `...decode_ffn.tokens_per_second` | number | yes | — | routed activation tokens/s | finite and > 0 | For resident expert batches, `T = sum(B_e) / rate`. The per-device job is atomic. |
 
 ### KV pool

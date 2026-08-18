@@ -1,4 +1,4 @@
-"""Discrete-event definitions."""
+"""Discrete events used by the reconstructed PD/AFD runtime."""
 
 from __future__ import annotations
 
@@ -8,20 +8,11 @@ from typing import Any
 
 
 class EventType(Enum):
-    AGENT_ARRIVAL = auto()
-    INVOCATION_READY = auto()
-    TASK_READY = auto()
-    TASK_START = auto()
-    TASK_FINISH = auto()
-    PREFILL_BATCH_START = auto()
-    PREFILL_BATCH_FINISH = auto()
-    KV_INGRESS_DATA_READY = auto()
-    KV_INGRESS_FINISH = auto()
-    DECODE_ITERATION_START = auto()
-    DECODE_STEP_FINISH = auto()
-    TOOL_WAIT_START = auto()
-    TOOL_RETURN = auto()
-    AGENT_FINISH = auto()
+    SESSION_ARRIVAL = auto()
+    TURN_READY = auto()
+    PREFILL_LAUNCH = auto()
+    DECODE_LAUNCH = auto()
+    POOL_WRITE_COMPLETE = auto()
 
 
 @dataclass(order=True, frozen=True)

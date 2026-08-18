@@ -123,6 +123,21 @@ class DecodeController:
             )
         )
 
+    def ready_sessions(self, ready_time_s: float) -> tuple[SessionState, ...]:
+        """Return positive-output sessions eligible for a step at this time."""
+
+        ready = _time(ready_time_s, "ready_time_s")
+        return self._ready_sessions(ready, require_output=True)
+
+    def ready_zero_output_sessions(
+        self,
+        ready_time_s: float,
+    ) -> tuple[SessionState, ...]:
+        """Return admitted zero-output sessions eligible for their pool flush."""
+
+        ready = _time(ready_time_s, "ready_time_s")
+        return self._ready_sessions(ready, require_output=False)
+
     def run_step(self, ready_time_s: float) -> DecodeStepResult:
         """Run exactly one whole-model step for every decode-ready active session."""
 

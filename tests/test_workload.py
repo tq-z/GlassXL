@@ -48,7 +48,7 @@ def test_fixed_seed_generation_is_identical_across_calls_and_instances() -> None
     third = WorkloadGenerator(config).generate()
 
     assert first == second == third
-    assert len(first) == 1000
+    assert len(first) == 8
     assert tuple(session.arrival_time_s for session in first) == tuple(
         sorted(session.arrival_time_s for session in first)
     )

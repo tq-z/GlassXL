@@ -2,7 +2,7 @@
 schema_version: 1
 
 # Physical devices. IDs are non-negative integers and must be unique.
-# Each device has one shared execution queue in the runtime built by later milestones.
+# Each device has one shared execution queue across all mapped capabilities.
 devices:
   - id: 0
     capabilities:

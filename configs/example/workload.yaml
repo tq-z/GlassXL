@@ -12,7 +12,8 @@ source:
   # Implemented source types: synthetic.
   type: synthetic
   # Number of sessions to generate; must be a non-negative integer.
-  num_sessions: 1000
+  # Eight keeps the checked-in end-to-end example fast enough for a smoke run.
+  num_sessions: 100
 
   arrival:
     # Implemented arrival types: poisson.

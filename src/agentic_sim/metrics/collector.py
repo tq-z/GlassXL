@@ -1,16 +1,28 @@
-"""In-memory metrics collection for the coarse P-D simulator."""
+"""Metrics collection from typed reconstructed controller results."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 from statistics import fmean
 
-from agentic_sim.hardware.simple_backend import SimpleHardwareBackend, TaskExecution
-from agentic_sim.metrics.batching_metrics import DecodeIterationMetric, IngressFlowMetric, PrefillBatchMetric
-from agentic_sim.metrics.request_metrics import AgentMetrics, InvocationMetrics
-from agentic_sim.metrics.resource_metrics import ResourceMetrics
-from agentic_sim.workload.agent import Agent, AgentState
-from agentic_sim.workload.invocation import Invocation
+from agentic_sim.hardware.topology import Topology
+from agentic_sim.runtime.attention_admission import AttentionAdmissionController
+from agentic_sim.runtime.decode_controller import DecodeStepResult, PendingPoolWrite
+from agentic_sim.runtime.prefill_controller import PrefillBatchResult, PrefillTransferResult
+from agentic_sim.runtime.session import AttentionKVResidency, DecodeEpisodeState, SessionState
+
+from .records import (
+    AttentionAdmissionMetric,
+    AttentionDeviceMetric,
+    DecodeStepMetric,
+    FFNDeviceMetric,
+    MetricsSnapshot,
+    PrefillBatchMetric,
+    PrefillSessionMetric,
+    ResourceMetric,
+    SessionMetric,
+    TurnMetric,
+)
 
 
 def _percentile(values: list[float], percentile: float) -> float:
@@ -24,302 +36,444 @@ def _percentile(values: list[float], percentile: float) -> float:
     return ordered[lower] * (1.0 - fraction) + ordered[upper] * fraction
 
 
-@dataclass(frozen=True)
-class MetricsSnapshot:
-    summary: dict[str, int | float]
-    agents: list[AgentMetrics]
-    invocations: list[InvocationMetrics]
-    resources: list[ResourceMetrics]
-    prefill_batches: list[PrefillBatchMetric]
-    ingress_flows: list[IngressFlowMetric]
-    decode_iterations: list[DecodeIterationMetric]
+@dataclass
+class _PrefillData:
+    session_id: int
+    turn_index: int
+    batch_id: int
+    device_id: int
+    state: str
+    context_tokens: int
+    prefill_tokens: int
+    load_tokens: int
+    queue_latency_s: float
+    service_latency_s: float
+    kv_pool_load_s: float
+    stateful_affinity_hit: bool
+    transfer_tokens: int = 0
+    kv_p2p_s: float = 0.0
+
+
+@dataclass
+class _PrefillBatchData:
+    batch_id: int
+    device_id: int
+    state: str
+    ready_time_s: float
+    start_time_s: float
+    finish_time_s: float
+    request_count: int
+    context_tokens: int
+    prefill_tokens: int
+    load_tokens: int
+    queue_latency_s: float
+    service_latency_s: float
+    transfer_tokens: int = 0
 
 
 class MetricsCollector:
+    """Accumulate Section 18 records without legacy byte or task semantics."""
+
     def __init__(self) -> None:
-        self.invocations: dict[int, InvocationMetrics] = {}
-        self.prefill_batches: list[PrefillBatchMetric] = []
-        self.ingress_flows: list[IngressFlowMetric] = []
-        self.decode_iterations: list[DecodeIterationMetric] = []
-        self._ingress_submissions: dict[int, tuple[int, int]] = {}
+        self._prefill: dict[tuple[int, int], _PrefillData] = {}
+        self._prefill_batches: dict[int, _PrefillBatchData] = {}
+        self._stateful_seen: set[int] = set()
+        self.attention_admissions: list[AttentionAdmissionMetric] = []
+        self.attention_devices: list[AttentionDeviceMetric] = []
+        self.decode_steps: list[DecodeStepMetric] = []
+        self._pool_completion: dict[tuple[int, int], tuple[float, float]] = {}
+        self._pool_loads: list[tuple[float, int]] = []
+        self._pool_offloads: list[tuple[float, int]] = []
+        self._p2p_transfers: list[tuple[float, int]] = []
 
-        self._active_count = 0
-        self._tool_waiting_count = 0
-        self._kv_waiting_count = 0
-        self._last_state_time = 0.0
-        self._active_area = 0.0
-        self._tool_waiting_area = 0.0
-        self._kv_waiting_area = 0.0
-
-        self._prefill_queue = 0
-        self._prefill_queue_area = 0.0
-        self._prefill_queue_last_time = 0.0
-        self.max_prefill_queue = 0
-        self._decode_queue = 0
-        self._decode_active = 0
-        self._decode_queue_area = 0.0
-        self._decode_active_area = 0.0
-        self._decode_last_time = 0.0
-        self.max_decode_queue = 0
-        self._ingress_active = 0
-        self._ingress_bandwidth = 0.0
-        self._ingress_active_area = 0.0
-        self._ingress_bandwidth_area = 0.0
-        self._ingress_last_time = 0.0
-        self.peak_ingress_active = 0
-
-    @staticmethod
-    def _state_counts(state: AgentState) -> tuple[int, int, int]:
-        return (
-            int(state in {AgentState.READY, AgentState.RUNNING}),
-            int(state is AgentState.TOOL_WAIT),
-            int(state is AgentState.KV_WAIT),
+    def record_prefill(self, result: PrefillBatchResult, state: str) -> None:
+        requests = {item.session.session_id: item for item in result.batch.requests}
+        first_ready = min(item.ready_time_s for item in result.batch.requests)
+        queue_latency = result.pool_load.start_time - first_ready
+        batch_data = _PrefillBatchData(
+            batch_id=result.batch.batch_id,
+            device_id=result.batch.device_id,
+            state=state,
+            ready_time_s=first_ready,
+            start_time_s=result.pool_load.start_time,
+            finish_time_s=result.compute.finish_time,
+            request_count=len(result.sessions),
+            context_tokens=sum(item.context_tokens for item in result.sessions),
+            prefill_tokens=sum(item.prefill_tokens for item in result.sessions),
+            load_tokens=sum(item.load_tokens for item in result.sessions),
+            queue_latency_s=queue_latency,
+            service_latency_s=result.compute.service_time,
         )
+        self._prefill_batches[batch_data.batch_id] = batch_data
+        self._pool_loads.append((result.pool_load.finish_time, batch_data.load_tokens))
+        for item in result.sessions:
+            request = requests[item.session_id]
+            episode = request.session.current_episode
+            if episode is None:
+                raise RuntimeError("prefill metrics require an active episode")
+            affinity_hit = state == "stateful" and item.session_id in self._stateful_seen
+            self._prefill[(item.session_id, episode.turn.turn_index)] = _PrefillData(
+                session_id=item.session_id,
+                turn_index=episode.turn.turn_index,
+                batch_id=result.batch.batch_id,
+                device_id=result.batch.device_id,
+                state=state,
+                context_tokens=item.context_tokens,
+                prefill_tokens=item.prefill_tokens,
+                load_tokens=item.load_tokens,
+                queue_latency_s=result.pool_load.start_time - request.ready_time_s,
+                service_latency_s=result.compute.service_time,
+                kv_pool_load_s=result.pool_load.service_time,
+                stateful_affinity_hit=affinity_hit,
+            )
+            if state == "stateful":
+                self._stateful_seen.add(item.session_id)
+        self.record_transfers(result.transfers)
 
-    def state_transition(self, time: float, old: AgentState, new: AgentState) -> None:
-        elapsed = time - self._last_state_time
-        self._active_area += elapsed * self._active_count
-        self._tool_waiting_area += elapsed * self._tool_waiting_count
-        self._kv_waiting_area += elapsed * self._kv_waiting_count
-        self._last_state_time = time
-        old_active, old_tool, old_kv = self._state_counts(old)
-        new_active, new_tool, new_kv = self._state_counts(new)
-        self._active_count += new_active - old_active
-        self._tool_waiting_count += new_tool - old_tool
-        self._kv_waiting_count += new_kv - old_kv
+    def record_transfers(self, transfers: tuple[PrefillTransferResult, ...]) -> None:
+        for transfer in transfers:
+            self._p2p_transfers.append((transfer.reservation.finish_time, transfer.total_tokens))
+            for admission in transfer.admissions:
+                key = self._active_key(admission.session_id)
+                data = self._prefill[key]
+                data.transfer_tokens += admission.transfer_tokens
+                data.kv_p2p_s += transfer.reservation.service_time
+                self._prefill_batches[data.batch_id].transfer_tokens += admission.transfer_tokens
+                self.attention_admissions.append(
+                    AttentionAdmissionMetric(
+                        session_id=admission.session_id,
+                        turn_index=key[1],
+                        time_s=admission.admission_time_s,
+                        device_id=admission.device_id,
+                        required_final_kv_tokens=admission.required_final_kv_tokens,
+                        transfer_tokens=admission.transfer_tokens,
+                        capacity_wait_s=admission.capacity_wait_s,
+                        cache_hit=admission.cache_hit,
+                        retry=admission.capacity_wait_s > 0.0,
+                        evicted_session_ids=admission.evicted_session_ids,
+                    )
+                )
 
-    def invocation_ready(self, invocation: Invocation) -> None:
-        self.invocations[invocation.invocation_id] = InvocationMetrics(
-            invocation_id=invocation.invocation_id,
-            agent_id=invocation.agent_id,
-            turn_index=invocation.turn_index,
-            ready_time_s=invocation.ready_time,
+    def record_decode(self, result: DecodeStepResult) -> None:
+        device_metrics = tuple(
+            FFNDeviceMetric(
+                device_id=batch.device_id,
+                expert_ids=tuple(work.expert_id for work in batch.experts),
+                activation_tokens=batch.activation_tokens,
+                service_latency_s=reservation.service_time,
+                barrier_wait_s=result.ffn_barrier_s - reservation.finish_time,
+            )
+            for batch, reservation in zip(result.expert_batches, result.ffn, strict=True)
         )
-
-    def invocation_prefill_queued(self, invocation_id: int, time: float) -> None:
-        self.invocations[invocation_id].prefill_queued_time_s = time
-
-    def invocation_prefill_started(self, invocation_id: int, time: float, queue_delay: float, service_time: float) -> None:
-        metric = self.invocations[invocation_id]
-        metric.prefill_start_time_s = time
-        metric.prefill_queueing_time_s += queue_delay
-        metric.queueing_time_s += queue_delay
-        metric.service_time_s += service_time
-
-    def invocation_prefill_finished(self, invocation_id: int, time: float) -> None:
-        self.invocations[invocation_id].prefill_finish_time_s = time
-
-    def invocation_ingress_started(self, invocation_id: int, time: float) -> None:
-        self.invocations[invocation_id].ingress_submit_time_s = time
-
-    def invocation_ingress_finished(self, invocation_id: int, time: float, duration: float) -> None:
-        metric = self.invocations[invocation_id]
-        metric.ingress_finish_time_s = time
-        metric.service_time_s += duration
-
-    def invocation_decode_queued(self, invocation_id: int, time: float) -> None:
-        self.invocations[invocation_id].decode_queued_time_s = time
-
-    def invocation_decode_admitted(self, invocation_id: int, time: float, queue_delay: float) -> None:
-        metric = self.invocations[invocation_id]
-        metric.decode_start_time_s = time
-        metric.decode_queueing_time_s += queue_delay
-        metric.queueing_time_s += queue_delay
-
-    def invocation_decode_token(self, invocation_id: int, time: float, service_time: float) -> None:
-        metric = self.invocations[invocation_id]
-        metric.token_times_s.append(time)
-        if metric.first_token_time_s is None:
-            metric.first_token_time_s = time
-        metric.service_time_s += service_time
-
-    def task_reserved(self, execution: TaskExecution) -> None:
-        if execution.task.metadata.get("background", False):
-            return
-        metric = self.invocations[execution.task.invocation_id]
-        metric.queueing_time_s += execution.reservation.queue_delay
-        metric.service_time_s += execution.reservation.service_time
-
-    def invocation_finished(self, invocation_id: int, time: float) -> None:
-        self.invocations[invocation_id].finish_time_s = time
-
-    def prefill_queue_changed(self, time: float, queue_length: int) -> None:
-        self._prefill_queue_area += (time - self._prefill_queue_last_time) * self._prefill_queue
-        self._prefill_queue_last_time = time
-        self._prefill_queue = queue_length
-        self.max_prefill_queue = max(self.max_prefill_queue, queue_length)
-
-    def prefill_batch_started(self, metric: PrefillBatchMetric) -> None:
-        self.prefill_batches.append(metric)
-
-    def decode_state_changed(self, time: float, waiting: int, active: int) -> None:
-        elapsed = time - self._decode_last_time
-        self._decode_queue_area += elapsed * self._decode_queue
-        self._decode_active_area += elapsed * self._decode_active
-        self._decode_last_time = time
-        self._decode_queue = waiting
-        self._decode_active = active
-        self.max_decode_queue = max(self.max_decode_queue, waiting)
-
-    def decode_iteration_started(self, metric: DecodeIterationMetric) -> None:
-        self.decode_iterations.append(metric)
-
-    def ingress_active_changed(self, time: float, active: int, aggregate_bandwidth: float) -> None:
-        elapsed = time - self._ingress_last_time
-        self._ingress_active_area += elapsed * self._ingress_active
-        self._ingress_bandwidth_area += elapsed * self._ingress_bandwidth
-        self._ingress_last_time = time
-        self._ingress_active = active
-        self._ingress_bandwidth = aggregate_bandwidth
-        self.peak_ingress_active = max(self.peak_ingress_active, active)
-
-    def ingress_flow_submitted(self, flow_id: int, session_id: int, byte_count: int) -> None:
-        self._ingress_submissions[flow_id] = (session_id, byte_count)
-
-    def ingress_flow_finished(self, metric: IngressFlowMetric) -> None:
-        self.ingress_flows.append(metric)
-
-    def snapshot(self, agents: list[Agent], backend: SimpleHardwareBackend, horizon: float) -> MetricsSnapshot:
-        self._advance_areas(horizon)
-        invocation_metrics = list(self.invocations.values())
-        prefill_time_by_agent: dict[int, float] = {}
-        decode_time_by_agent: dict[int, float] = {}
-        for invocation in invocation_metrics:
-            prefill_time_by_agent[invocation.agent_id] = (
-                prefill_time_by_agent.get(invocation.agent_id, 0.0) + invocation.prefill_time_s
+        loads = tuple(item.activation_tokens for item in device_metrics)
+        self.decode_steps.append(
+            DecodeStepMetric(
+                decode_step=result.decode_step,
+                ready_time_s=result.batch.ready_time_s,
+                finish_time_s=result.token_completion_time_s,
+                active_sessions=result.batch.size,
+                attention_barrier_s=result.attention_barrier_s,
+                attention_device_wait_s=tuple(
+                    (reservation.device_id, result.attention_barrier_s - reservation.finish_time)
+                    for reservation in result.attention
+                ),
+                routed_activation_tokens=result.activation_tokens,
+                send_tokens=result.send_tokens,
+                dispatch_latency_s=result.dispatch.service_time,
+                combine_latency_s=result.combine.service_time,
+                expert_loads=tuple(
+                    (work.expert_id, work.activation_tokens, work.device_id)
+                    for work in result.expert_loads
+                ),
+                ffn_devices=device_metrics,
+                ffn_load_imbalance_tokens=(max(loads) - min(loads)) if loads else 0,
+                emitted_tokens=result.batch.size,
             )
-            decode_time_by_agent[invocation.agent_id] = (
-                decode_time_by_agent.get(invocation.agent_id, 0.0) + invocation.decode_time_s
-            )
-        agent_metrics = [
-            AgentMetrics.from_agent(
-                agent,
-                prefill_time_by_agent.get(agent.agent_id, 0.0),
-                decode_time_by_agent.get(agent.agent_id, 0.0),
-            )
-            for agent in agents
-            if agent.state is AgentState.FINISHED
-        ]
-        completed_invocations = [item for item in invocation_metrics if item.finish_time_s is not None]
-        resources = self._resource_metrics(backend, horizon)
-        latencies_ms = [item.total_latency_s * 1_000.0 for item in agent_metrics]
-        compute = [item for item in resources if item.resource_type == "compute"]
-        memory = [item for item in resources if item.resource_type == "memory"]
-        links = [item for item in resources if item.resource_type == "link"]
-        offered = sum(agent.arrival_time <= horizon for agent in agents)
-        ttft_ms = [item.ttft_s * 1_000.0 for item in completed_invocations if item.ttft_s is not None]
-        inter_token_ms = [delta * 1_000.0 for item in completed_invocations for delta in item.inter_token_times_s]
-        prefill_queue_ms = [item.prefill_queueing_time_s * 1_000.0 for item in invocation_metrics]
-        decode_queue_ms = [item.decode_queueing_time_s * 1_000.0 for item in invocation_metrics]
-        emitted_tokens = sum(item.emitted_tokens for item in self.decode_iterations if item.finish_time_s <= horizon)
-        total_ingress_bytes = sum(item.byte_count for item in self.ingress_flows if item.finish_time_s <= horizon)
-        decode_session_ms = [
-            (item.finish_time_s - item.decode_start_time_s) * 1_000.0
-            for item in completed_invocations
-            if item.decode_start_time_s is not None and item.finish_time_s is not None
-        ]
+        )
+        for pending in result.pool_writes:
+            self.record_pool_write(pending)
 
+    def record_pool_write(self, pending: PendingPoolWrite) -> None:
+        episode = pending.session.current_episode
+        if episode is None:
+            raise RuntimeError("pool-write metrics require an active episode")
+        key = (pending.session_id, episode.turn.turn_index)
+        self._pool_completion[key] = (
+            pending.reservation.finish_time,
+            pending.reservation.service_time,
+        )
+        self._pool_offloads.append((pending.reservation.finish_time, pending.payload_tokens))
+
+    def capture_attention(
+        self,
+        time_s: float,
+        attention: AttentionAdmissionController,
+    ) -> None:
+        for device_id in attention.device_ids:
+            device = attention.devices[device_id]
+            residents = tuple(device.resident_sessions.values())
+            dirty = sum(
+                item.kv.attention.state is AttentionKVResidency.DRAINING_DIRTY
+                for item in residents
+            )
+            clean = sum(
+                item.kv.attention.state is AttentionKVResidency.INACTIVE_CLEAN
+                for item in residents
+            )
+            reserved = device.reserved_or_used_tokens
+            utilization = reserved / device.capacity_tokens if device.capacity_tokens else 0.0
+            self.attention_devices.append(
+                AttentionDeviceMetric(
+                    time_s=time_s,
+                    device_id=device_id,
+                    active_sessions=sum(
+                        item.kv.attention.state is AttentionKVResidency.ACTIVE
+                        for item in residents
+                    ),
+                    resident_sessions=len(residents),
+                    active_context_tokens=device.active_context_load,
+                    active_commitment_tokens=device.active_commitment_tokens,
+                    resident_used_tokens=device.resident_used_tokens,
+                    capacity_tokens=device.capacity_tokens,
+                    capacity_utilization=utilization,
+                    dirty_sessions=dirty,
+                    clean_inactive_sessions=clean,
+                )
+            )
+
+    def snapshot(
+        self,
+        sessions: tuple[SessionState, ...],
+        topology: Topology,
+        horizon_s: float,
+    ) -> MetricsSnapshot:
+        turns = tuple(
+            metric
+            for session in sorted(sessions, key=lambda item: item.session_id)
+            for metric in self._turn_metrics(session, horizon_s)
+        )
+        session_metrics = tuple(self._session_metric(session, horizon_s) for session in sessions)
+        completed_sessions = [item for item in session_metrics if item.finish_time_s is not None]
+        completed_turns = [item for item in turns if item.finish_time_s is not None]
+        visible_steps = [item for item in self.decode_steps if item.finish_time_s <= horizon_s]
+        ttfts = [item.ttft_s for item in completed_turns if item.ttft_s is not None]
+        inter_token = [value for item in completed_turns for value in item.inter_token_latencies_s]
+        latencies = [item.completion_latency_s for item in completed_sessions if item.completion_latency_s is not None]
+        resources = self._resource_metrics(topology, horizon_s)
+        admissions = tuple(
+            item for item in self.attention_admissions if item.time_s <= horizon_s
+        )
+        prefill_sessions = tuple(
+            PrefillSessionMetric(
+                session_id=item.session_id,
+                turn_index=item.turn_index,
+                batch_id=item.batch_id,
+                device_id=item.device_id,
+                state=item.state,
+                load_kind=("full_context" if item.load_tokens == item.context_tokens else "delta"),
+                context_tokens=item.context_tokens,
+                prefill_tokens=item.prefill_tokens,
+                load_tokens=item.load_tokens,
+                compute_tokens=item.prefill_tokens,
+                transfer_tokens=item.transfer_tokens,
+                queue_latency_s=item.queue_latency_s,
+                service_latency_s=item.service_latency_s,
+                stateful_affinity_hit=item.stateful_affinity_hit,
+            )
+            for item in sorted(self._prefill.values(), key=lambda value: (value.session_id, value.turn_index))
+        )
+        prefill_batches = tuple(
+            PrefillBatchMetric(
+                batch_id=item.batch_id,
+                device_id=item.device_id,
+                state=item.state,
+                ready_time_s=item.ready_time_s,
+                start_time_s=item.start_time_s,
+                finish_time_s=item.finish_time_s,
+                request_count=item.request_count,
+                context_tokens=item.context_tokens,
+                prefill_tokens=item.prefill_tokens,
+                load_tokens=item.load_tokens,
+                transfer_tokens=item.transfer_tokens,
+                queue_latency_s=item.queue_latency_s,
+                service_latency_s=item.service_latency_s,
+            )
+            for item in sorted(self._prefill_batches.values(), key=lambda value: value.batch_id)
+            if item.start_time_s <= horizon_s
+        )
+        emitted_tokens = sum(item.emitted_tokens for item in visible_steps)
         summary: dict[str, int | float] = {
-            "simulation_time_s": horizon,
-            "offered_agents": offered,
-            "completed_agents": len(agent_metrics),
-            "agent_throughput_per_s": len(agent_metrics) / horizon if horizon > 0.0 else 0.0,
-            "invocation_throughput_per_s": len(completed_invocations) / horizon if horizon > 0.0 else 0.0,
-            "mean_latency_ms": fmean(latencies_ms) if latencies_ms else 0.0,
-            "p50_latency_ms": _percentile(latencies_ms, 0.50),
-            "p95_latency_ms": _percentile(latencies_ms, 0.95),
-            "p99_latency_ms": _percentile(latencies_ms, 0.99),
-            "mean_queueing_ms": fmean(item.queueing_time_s for item in agent_metrics) * 1_000.0 if agent_metrics else 0.0,
-            "mean_tool_wait_ms": fmean(item.tool_wait_time_s for item in agent_metrics) * 1_000.0 if agent_metrics else 0.0,
-            "mean_agent_prefill_time_ms": fmean(item.prefill_time_s for item in agent_metrics) * 1_000.0 if agent_metrics else 0.0,
-            "mean_agent_decode_time_ms": fmean(item.decode_time_s for item in agent_metrics) * 1_000.0 if agent_metrics else 0.0,
-            "compute_utilization": fmean(item.utilization for item in compute) if compute else 0.0,
-            "memory_utilization": fmean(item.utilization for item in memory) if memory else 0.0,
-            "link_utilization": fmean(item.utilization for item in links) if links else 0.0,
-            "max_compute_queue": max(max((item.max_queue_length for item in compute), default=0), self.max_prefill_queue, self.max_decode_queue),
-            "max_memory_queue": max((item.max_queue_length for item in memory), default=0),
-            "max_link_queue": max((item.max_queue_length for item in links), default=0),
-            "average_active_agents": self._active_area / horizon if horizon > 0.0 else 0.0,
-            "average_tool_wait_agents": self._tool_waiting_area / horizon if horizon > 0.0 else 0.0,
-            "average_kv_wait_agents": self._kv_waiting_area / horizon if horizon > 0.0 else 0.0,
-            "offered_load_per_s": offered / horizon if horizon > 0.0 else 0.0,
-            "completed_load_per_s": len(agent_metrics) / horizon if horizon > 0.0 else 0.0,
-            "prefill_batches": len(self.prefill_batches),
-            "mean_prefill_batch_requests": fmean(item.request_count for item in self.prefill_batches) if self.prefill_batches else 0.0,
-            "mean_prefill_batch_tokens": fmean(item.total_tokens for item in self.prefill_batches) if self.prefill_batches else 0.0,
-            "mean_prefill_batch_service_ms": fmean((item.finish_time_s - item.start_time_s) * 1_000.0 for item in self.prefill_batches) if self.prefill_batches else 0.0,
-            "mean_prefill_queueing_ms": fmean(prefill_queue_ms) if prefill_queue_ms else 0.0,
-            "max_prefill_queue": self.max_prefill_queue,
-            "average_prefill_queue": self._prefill_queue_area / horizon if horizon > 0.0 else 0.0,
-            "ingress_flows": len(self.ingress_flows),
-            "total_ingress_bytes": total_ingress_bytes,
-            "mean_ingress_completion_ms": fmean((item.finish_time_s - item.submitted_time_s) * 1_000.0 for item in self.ingress_flows) if self.ingress_flows else 0.0,
-            "mean_ingress_achieved_bandwidth_bytes_per_s": fmean(item.achieved_bandwidth_bytes_per_s for item in self.ingress_flows) if self.ingress_flows else 0.0,
-            "average_aggregate_ingress_bandwidth_bytes_per_s": self._ingress_bandwidth_area / horizon if horizon > 0.0 else 0.0,
-            "peak_concurrent_ingress_flows": self.peak_ingress_active,
-            "decode_iterations": len(self.decode_iterations),
-            "decode_tokens_emitted": emitted_tokens,
-            "mean_decode_batch_size": fmean(item.active_sessions for item in self.decode_iterations) if self.decode_iterations else 0.0,
-            "mean_decode_step_ms": fmean((item.finish_time_s - item.start_time_s) * 1_000.0 for item in self.decode_iterations) if self.decode_iterations else 0.0,
-            "decode_token_throughput_per_s": emitted_tokens / horizon if horizon > 0.0 else 0.0,
-            "mean_decode_session_completion_ms": fmean(decode_session_ms) if decode_session_ms else 0.0,
-            "mean_ttft_ms": fmean(ttft_ms) if ttft_ms else 0.0,
-            "p50_ttft_ms": _percentile(ttft_ms, 0.50),
-            "p95_ttft_ms": _percentile(ttft_ms, 0.95),
-            "p99_ttft_ms": _percentile(ttft_ms, 0.99),
-            "mean_inter_token_ms": fmean(inter_token_ms) if inter_token_ms else 0.0,
-            "p95_inter_token_ms": _percentile(inter_token_ms, 0.95),
-            "p99_inter_token_ms": _percentile(inter_token_ms, 0.99),
-            "mean_decode_queueing_ms": fmean(decode_queue_ms) if decode_queue_ms else 0.0,
-            "max_decode_queue": self.max_decode_queue,
-            "mean_ingress_wait_ms": fmean((item.data_start_time_s - item.submitted_time_s) * 1_000.0 for item in self.ingress_flows) if self.ingress_flows else 0.0,
-            "average_decode_queue": self._decode_queue_area / horizon if horizon > 0.0 else 0.0,
-            "average_decode_active_sessions": self._decode_active_area / horizon if horizon > 0.0 else 0.0,
-            "average_active_ingress_flows": self._ingress_active_area / horizon if horizon > 0.0 else 0.0,
+            "simulation_time_s": horizon_s,
+            "offered_sessions": sum(item.spec.arrival_time_s <= horizon_s for item in sessions),
+            "completed_sessions": len(completed_sessions),
+            "completed_turns": len(completed_turns),
+            "decode_steps": len(visible_steps),
+            "emitted_tokens": emitted_tokens,
+            "decode_token_throughput_per_s": emitted_tokens / horizon_s if horizon_s else 0.0,
+            "mean_session_latency_ms": (fmean(latencies) * 1_000.0 if latencies else 0.0),
+            "p95_session_latency_ms": _percentile(latencies, 0.95) * 1_000.0,
+            "mean_ttft_ms": (fmean(ttfts) * 1_000.0 if ttfts else 0.0),
+            "p95_ttft_ms": _percentile(ttfts, 0.95) * 1_000.0,
+            "mean_inter_token_ms": (fmean(inter_token) * 1_000.0 if inter_token else 0.0),
+            "prefill_compute_tokens": sum(item.compute_tokens for item in prefill_sessions),
+            "kv_pool_load_tokens": sum(tokens for finish, tokens in self._pool_loads if finish <= horizon_s),
+            "kv_pool_offload_tokens": sum(tokens for finish, tokens in self._pool_offloads if finish <= horizon_s),
+            "kv_p2p_tokens": sum(tokens for finish, tokens in self._p2p_transfers if finish <= horizon_s),
+            "routed_activation_tokens": sum(item.routed_activation_tokens for item in visible_steps),
+            "all_to_all_send_tokens": sum(2 * item.send_tokens for item in visible_steps),
+            "attention_admissions": len(admissions),
+            "attention_retries": sum(item.retry for item in admissions),
+            "attention_cache_hits": sum(item.cache_hit for item in admissions),
+            "attention_cache_misses": sum(not item.cache_hit for item in admissions),
+            "lru_evictions": sum(len(item.evicted_session_ids) for item in admissions),
         }
         return MetricsSnapshot(
-            summary,
-            agent_metrics,
-            invocation_metrics,
-            resources,
-            list(self.prefill_batches),
-            list(self.ingress_flows),
-            list(self.decode_iterations),
+            summary=summary,
+            sessions=session_metrics,
+            turns=turns,
+            attention_admissions=tuple(
+                sorted(
+                    admissions,
+                    key=lambda item: (item.time_s, item.session_id, item.turn_index),
+                )
+            ),
+            attention_devices=tuple(
+                sorted(
+                    (
+                        item
+                        for item in self.attention_devices
+                        if item.time_s <= horizon_s
+                    ),
+                    key=lambda item: (item.time_s, item.device_id),
+                )
+            ),
+            prefill_batches=prefill_batches,
+            prefill_sessions=prefill_sessions,
+            decode_steps=tuple(visible_steps),
+            resources=resources,
         )
 
-    def _advance_areas(self, horizon: float) -> None:
-        if horizon > self._last_state_time:
-            elapsed = horizon - self._last_state_time
-            self._active_area += elapsed * self._active_count
-            self._tool_waiting_area += elapsed * self._tool_waiting_count
-            self._kv_waiting_area += elapsed * self._kv_waiting_count
-            self._last_state_time = horizon
-        if horizon > self._prefill_queue_last_time:
-            self._prefill_queue_area += (horizon - self._prefill_queue_last_time) * self._prefill_queue
-            self._prefill_queue_last_time = horizon
-        if horizon > self._decode_last_time:
-            elapsed = horizon - self._decode_last_time
-            self._decode_queue_area += elapsed * self._decode_queue
-            self._decode_active_area += elapsed * self._decode_active
-            self._decode_last_time = horizon
-        if horizon > self._ingress_last_time:
-            elapsed = horizon - self._ingress_last_time
-            self._ingress_active_area += elapsed * self._ingress_active
-            self._ingress_bandwidth_area += elapsed * self._ingress_bandwidth
-            self._ingress_last_time = horizon
+    def _active_key(self, session_id: int) -> tuple[int, int]:
+        matches = [key for key in self._prefill if key[0] == session_id]
+        if not matches:
+            raise RuntimeError(f"session {session_id} has no recorded prefill")
+        return max(matches, key=lambda key: key[1])
 
-    @staticmethod
-    def _resource_metrics(backend: SimpleHardwareBackend, horizon: float) -> list[ResourceMetrics]:
-        result: list[ResourceMetrics] = []
-        completed_bytes: dict[str, int] = {}
-        for execution in backend.executions:
-            if execution.reservation.finish_time <= horizon:
-                resource_id = execution.reservation.resource_id
-                completed_bytes[resource_id] = completed_bytes.get(resource_id, 0) + execution.byte_count
-        for device in backend.topology.devices.values():
-            result.append(ResourceMetrics(device.queue.resource_id, "compute", device.queue.busy_time(horizon), device.queue.utilization(horizon), device.queue.max_queue_length, 0))
-        for memory_resource in backend.topology.memories.values():
-            result.append(ResourceMetrics(memory_resource.queue.resource_id, "memory", memory_resource.queue.busy_time(horizon), memory_resource.queue.utilization(horizon), memory_resource.queue.max_queue_length, completed_bytes.get(memory_resource.queue.resource_id, 0)))
-        for link in backend.topology.links.values():
-            result.append(ResourceMetrics(link.queue.resource_id, "link", link.queue.busy_time(horizon), link.queue.utilization(horizon), link.queue.max_queue_length, completed_bytes.get(link.queue.resource_id, 0)))
-        return result
+    def _turn_metrics(self, session: SessionState, horizon_s: float) -> tuple[TurnMetric, ...]:
+        episodes: list[DecodeEpisodeState] = list(session.completed_episodes)
+        if session.current_episode is not None:
+            episodes.append(session.current_episode)
+        admissions = {
+            (item.session_id, item.turn_index): item for item in self.attention_admissions
+        }
+        result: list[TurnMetric] = []
+        for episode in episodes:
+            key = (session.session_id, episode.turn.turn_index)
+            prefill = self._prefill.get(key)
+            admission = admissions.get(key)
+            pool = self._pool_completion.get(key)
+            finish = pool[0] if pool is not None and pool[0] <= horizon_s else None
+            token_times = tuple(time for time in episode.token_completion_times_s if time <= horizon_s)
+            ttft = token_times[0] - episode.turn_ready_time_s if token_times else None
+            inter_token = tuple(later - earlier for earlier, later in zip(token_times, token_times[1:]))
+            decode_latency = (
+                token_times[-1] - episode.attention_ready_time_s
+                if token_times and episode.attention_ready_time_s is not None
+                else (0.0 if episode.turn.output_tokens == 0 and finish is not None else None)
+            )
+            result.append(
+                TurnMetric(
+                    session_id=session.session_id,
+                    turn_index=episode.turn.turn_index,
+                    arrival_time_s=session.spec.arrival_time_s,
+                    ready_time_s=episode.turn_ready_time_s,
+                    finish_time_s=finish,
+                    attention_capacity_wait_s=episode.attention_capacity_wait_s,
+                    prefill_queue_s=prefill.queue_latency_s if prefill else 0.0,
+                    prefill_service_s=prefill.service_latency_s if prefill else 0.0,
+                    kv_pool_load_s=prefill.kv_pool_load_s if prefill else 0.0,
+                    kv_p2p_s=prefill.kv_p2p_s if prefill else 0.0,
+                    decode_admission_s=(
+                        admission.time_s - episode.turn_ready_time_s if admission else None
+                    ),
+                    ttft_s=ttft,
+                    inter_token_latencies_s=inter_token,
+                    decode_episode_latency_s=decode_latency,
+                    tool_wait_s=(
+                        episode.turn.tool_wait_s
+                        if episode.turn.turn_index < len(session.spec.turns) - 1
+                        else 0.0
+                    ),
+                    completion_latency_s=(finish - episode.turn_ready_time_s if finish is not None else None),
+                    context_tokens=episode.context_before_prefill,
+                    prefill_tokens=episode.turn.prefill_tokens,
+                    output_tokens=episode.turn.output_tokens,
+                    generated_tokens=len(token_times),
+                    pool_write_tokens=episode.pool_write_tokens if finish is not None else None,
+                    kv_pool_offload_s=pool[1] if finish is not None and pool is not None else 0.0,
+                    attention_device_id=admission.device_id if admission else None,
+                    attention_cache_hit=admission.cache_hit if admission else None,
+                )
+            )
+        return tuple(result)
+
+    def _session_metric(self, session: SessionState, horizon_s: float) -> SessionMetric:
+        last_key = (session.session_id, len(session.spec.turns) - 1)
+        pool = self._pool_completion.get(last_key)
+        finish = pool[0] if session.is_finished and pool is not None and pool[0] <= horizon_s else None
+        return SessionMetric(
+            session_id=session.session_id,
+            arrival_time_s=session.spec.arrival_time_s,
+            finish_time_s=finish,
+            completion_latency_s=(finish - session.spec.arrival_time_s if finish is not None else None),
+            completed_turns=len(session.completed_episodes),
+            total_turns=len(session.spec.turns),
+            initial_context_tokens=session.spec.initial_context_tokens,
+            final_context_tokens=session.current_context_tokens,
+            generated_tokens=sum(item.generated_tokens for item in session.completed_episodes),
+            tool_wait_s=sum(item.tool_wait_s for item in session.spec.turns[:-1]),
+        )
+
+    def _resource_metrics(self, topology: Topology, horizon_s: float) -> tuple[ResourceMetric, ...]:
+        result: list[ResourceMetric] = []
+        for device_id in sorted(topology.devices):
+            device = topology.devices[device_id]
+            operations: dict[str, float] = {}
+            for item in device.reservations:
+                busy = max(0.0, min(item.finish_time, horizon_s) - item.start_time)
+                operations[item.operation.value] = operations.get(item.operation.value, 0.0) + busy
+            result.append(
+                ResourceMetric(
+                    resource_id=device.queue.resource_id,
+                    resource_type="physical_device",
+                    busy_time_s=device.queue.busy_time(horizon_s),
+                    queue_time_s=sum(
+                        item.queue_delay for item in device.reservations if item.start_time <= horizon_s
+                    ),
+                    utilization=device.queue.utilization(horizon_s),
+                    max_queue_length=device.queue.max_queue_length,
+                    operation_busy_time_s=tuple(sorted(operations.items())),
+                    transferred_tokens=0,
+                )
+            )
+        logical = (
+            ("ffn_all_to_all", topology.ffn_all_to_all.queue, sum(2 * item.send_tokens for item in self.decode_steps if item.finish_time_s <= horizon_s)),
+            ("kv_p2p", topology.kv_p2p.queue, sum(tokens for finish, tokens in self._p2p_transfers if finish <= horizon_s)),
+            ("kv_pool", topology.kv_pool.queue, sum(tokens for finish, tokens in self._pool_loads + self._pool_offloads if finish <= horizon_s)),
+        )
+        for resource_type, queue, tokens in logical:
+            result.append(
+                ResourceMetric(
+                    resource_id=queue.resource_id,
+                    resource_type=resource_type,
+                    busy_time_s=queue.busy_time(horizon_s),
+                    queue_time_s=sum(
+                        item.queue_delay for item in queue.reservations if item.start_time <= horizon_s
+                    ),
+                    utilization=queue.utilization(horizon_s),
+                    max_queue_length=queue.max_queue_length,
+                    operation_busy_time_s=((resource_type, queue.busy_time(horizon_s)),),
+                    transferred_tokens=tokens,
+                )
+            )
+        return tuple(result)

@@ -60,7 +60,7 @@ def test_three_examples_load_into_one_immutable_config() -> None:
 
     assert isinstance(config, SimulationConfig)
     assert config.hardware.devices[0].id == 0
-    assert config.workload.source.num_sessions == 1000
+    assert config.workload.source.num_sessions == 8
     assert config.mapping.model.num_experts == 8
     assert isinstance(config.hardware.devices, tuple)
     assert isinstance(config.mapping.decode_ffn.experts_by_device, tuple)

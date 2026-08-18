@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+from bisect import bisect_right
 from dataclasses import dataclass
 
 
@@ -22,6 +23,7 @@ class FCFSResource:
         self.resource_id = resource_id
         self.available_time = 0.0
         self.reservations: list[Reservation] = []
+        self._start_times: list[float] = []
         self.queue_samples: list[tuple[float, int]] = [(0.0, 0)]
         self.max_queue_length = 0
 
@@ -46,18 +48,14 @@ class FCFSResource:
             queue_delay=start_time - ready_time,
             service_time=service_time,
         )
-        self.reservations.append(reservation)
-        self.available_time = finish_time
-        queue_length = (
-            1
-            + sum(
-                1
-                for previous in self.reservations[:-1]
-                if previous.start_time > ready_time
-            )
-            if start_time > ready_time
-            else 0
+        queued_ahead = len(self._start_times) - bisect_right(
+            self._start_times,
+            ready_time,
         )
+        self.reservations.append(reservation)
+        self._start_times.append(start_time)
+        self.available_time = finish_time
+        queue_length = 1 + queued_ahead if start_time > ready_time else 0
         self.max_queue_length = max(self.max_queue_length, queue_length)
         self.queue_samples.append((ready_time, queue_length))
         if start_time > ready_time:
