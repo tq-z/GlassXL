@@ -1,0 +1,48 @@
+# Input file for scripts/generate_config.py.
+#
+# Keys use the same snake_case names as the CLI option destinations.  Every
+# value below can instead be supplied as a command-line flag.  If both are
+# present, the explicit command-line flag wins.
+
+# Canonical aliases include: GLM5.2, DeepSeek-V4, Kimi K3, Qwen3.8-2.4T,
+# GLM-4.5, DeepSeek-V3, Kimi-K2, and QWEN3-235B.
+model: Kimi-K2
+
+# Effective usable per-device rates.  Units are decimal SI: FLOP/s and bytes/s.
+device_flops_per_second: 1.0e15
+device_memory_bandwidth_bytes_per_second: 3.0e12
+
+# Deployment and calibration operating points.
+dp: 2                         # Decode-attention replicas.
+ep: 4                         # FFN expert-parallel devices.
+prefill_tokens: 4096          # New incremental tokens processed by prefill.
+decode_context_tokens: 32768  # Existing prefill context and decode reference C.
+
+# Device memory budget used only to derive attention KV capacity in tokens.
+attn_kv_capacity_bytes: 8.0e10
+
+# FFN dispatch/combine fabric.  The payload floor is in bytes here and is
+# converted to routed activation tokens using the selected model's width.
+ffn_all_to_all_bandwidth_bytes_per_second: 4.0e11
+ffn_all_to_all_start_latency_us: 5
+ffn_all_to_all_min_payload_bytes: 16384
+
+# KV transfer and backing-pool links.  These byte rates are converted using
+# the model's effective KV bytes per context token.
+kv_p2p_bandwidth_bytes_per_second: 2.0e11
+kv_p2p_start_latency_us: 5
+kv_pool_bandwidth_bytes_per_second: 1.0e11
+kv_pool_start_latency_us: 10
+
+# Output location.  The generator writes hardware.yaml, mapping.yaml, and
+# roofline_report.yaml into this directory.
+output_dir: generated/kimi-k2
+
+# Optional precision widths; BF16-style two-byte values are the defaults.
+weight_bytes: 2
+activation_bytes: 2
+kv_bytes: 2
+
+# Optional placement/output controls.
+colocate_attn_ffn: false     # Requires dp == ep when enabled.
+force: false                 # Set true, or pass --force, to replace outputs.

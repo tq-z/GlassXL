@@ -32,7 +32,7 @@ devices:
 
   - id: 3
     capabilities:
-      # Implemented decode-FFN models: linear_expert_batch.
+      # Implemented decode-FFN models: linear_expert_batch, batch_latency_curve.
       decode_ffn:
         model: linear_expert_batch
         # Whole-model routed expert-activation capacity in tokens/s; must be > 0.
@@ -40,7 +40,7 @@ devices:
 
   - id: 4
     capabilities:
-      # Implemented decode-FFN models: linear_expert_batch.
+      # Implemented decode-FFN models: linear_expert_batch, batch_latency_curve.
       decode_ffn:
         model: linear_expert_batch
         tokens_per_second: 100000

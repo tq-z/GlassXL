@@ -8,6 +8,7 @@ from agentic_sim.hardware.compute_models import (
     AggregatePrefillLatencyModel,
     AttentionLatencyModel,
     AttentionWork,
+    BatchLatencyCurveExpertModel,
     ExpertComputeLatencyModel,
     ExpertWork,
     LinearAttentionLatencyModel,
@@ -149,3 +150,32 @@ def test_transfer_models_reject_invalid_inputs() -> None:
         p2p.latency_s(-1, 0, 1)
     with pytest.raises(ValueError, match="tokens"):
         pool.latency_s(-1)
+
+def test_batch_latency_curve_exact_interpolated_and_extrapolated() -> None:
+    model = BatchLatencyCurveExpertModel(((0, 0.0), (2, 0.01), (4, 0.03)))
+
+    def work(tokens: int) -> tuple[ExpertWork, ...]:
+        return (ExpertWork(expert_id=0, activation_tokens=tokens, device_id=0),)
+
+    assert model.latency_s((), CONTEXT) == 0.0
+    assert model.latency_s(work(2), CONTEXT) == pytest.approx(0.01)
+    assert model.latency_s(work(3), CONTEXT) == pytest.approx(0.02)
+    assert model.latency_s(work(6), CONTEXT) == pytest.approx(0.05)
+    assert isinstance(model, ExpertComputeLatencyModel)
+
+
+@pytest.mark.parametrize(
+    "points",
+    [
+        ((0, 0.0),),
+        ((1, 0.0), (2, 1.0)),
+        ((0, 0.0), (0, 1.0)),
+        ((0, 0.0), (2, 1.0), (3, 0.5)),
+        ((0, 0.0), (2, 1.0), (3, 1.0)),
+    ],
+)
+def test_batch_latency_curve_rejects_invalid_points(
+    points: tuple[tuple[int, float], ...],
+) -> None:
+    with pytest.raises(ValueError):
+        BatchLatencyCurveExpertModel(points)

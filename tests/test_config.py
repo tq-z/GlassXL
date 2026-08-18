@@ -331,3 +331,68 @@ def test_examples_comment_every_implemented_discriminator_value() -> None:
     }
     for value in expected_values:
         assert value in text
+
+def test_batch_latency_curve_capability_loads_and_builds_runtime_model(
+    tmp_path: Path,
+) -> None:
+    hardware, workload, mapping = example_documents()
+    hardware["devices"][3]["capabilities"]["decode_ffn"] = {
+        "model": "batch_latency_curve",
+        "points": [
+            {"activation_tokens": 0, "latency_us": 0},
+            {"activation_tokens": 4, "latency_us": 10},
+            {"activation_tokens": 8, "latency_us": 30},
+        ],
+    }
+
+    config = load_documents(tmp_path, hardware, workload, mapping)
+    capability = config.hardware.devices[3].capabilities.decode_ffn
+
+    assert capability is not None
+    assert capability.tokens_per_second is None
+    assert [point.activation_tokens for point in capability.points] == [0, 4, 8]
+
+
+@pytest.mark.parametrize(
+    ("points", "message"),
+    [
+        ([{"activation_tokens": 0, "latency_us": 0}], "at least two"),
+        (
+            [
+                {"activation_tokens": 1, "latency_us": 0},
+                {"activation_tokens": 2, "latency_us": 1},
+            ],
+            "first point",
+        ),
+        (
+            [
+                {"activation_tokens": 0, "latency_us": 0},
+                {"activation_tokens": 2, "latency_us": 2},
+                {"activation_tokens": 1, "latency_us": 3},
+            ],
+            "strictly increasing",
+        ),
+        (
+            [
+                {"activation_tokens": 0, "latency_us": 0},
+                {"activation_tokens": 1, "latency_us": 2},
+                {"activation_tokens": 2, "latency_us": 2},
+            ],
+            "positive slope",
+        ),
+    ],
+)
+def test_batch_latency_curve_config_validation_is_strict(
+    tmp_path: Path,
+    points: list[dict[str, int]],
+    message: str,
+) -> None:
+    hardware, _, _ = example_documents()
+    hardware["devices"][3]["capabilities"]["decode_ffn"] = {
+        "model": "batch_latency_curve",
+        "points": points,
+    }
+    hardware_path = write_documents(tmp_path, hardware, {}, {})[0]
+
+    with pytest.raises(ConfigurationError, match=message):
+        load_hardware_config(hardware_path)

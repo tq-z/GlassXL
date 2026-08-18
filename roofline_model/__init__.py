@@ -1,0 +1,51 @@
+"""Public API for the lightweight MoE roofline estimator."""
+
+from .estimator import (
+    CurvePoint,
+    DeploymentSpec,
+    FFNCurve,
+    FFNCurveSet,
+    GroupEstimate,
+    HardwareSpec,
+    ModelEstimate,
+    OperatingPoint,
+    PhaseEstimate,
+    PrecisionSpec,
+    build_ffn_curve,
+    estimate_decode_attention,
+    estimate_model,
+    estimate_prefill,
+    kv_token_size,
+    roofline_time,
+)
+from .specs import (
+    AttentionProfile,
+    LayerGroup,
+    ModelSpec,
+    resolve_model,
+    supported_models,
+)
+
+__all__ = [
+    "AttentionProfile",
+    "CurvePoint",
+    "DeploymentSpec",
+    "FFNCurve",
+    "FFNCurveSet",
+    "GroupEstimate",
+    "HardwareSpec",
+    "LayerGroup",
+    "ModelEstimate",
+    "ModelSpec",
+    "OperatingPoint",
+    "PhaseEstimate",
+    "PrecisionSpec",
+    "build_ffn_curve",
+    "estimate_decode_attention",
+    "estimate_model",
+    "estimate_prefill",
+    "kv_token_size",
+    "resolve_model",
+    "roofline_time",
+    "supported_models",
+]

@@ -14,6 +14,7 @@ from .models import (
     AttentionModel,
     AttentionPlacement,
     AttentionResidency,
+    BatchLatencyPointConfig,
     BoundedIntegerDistributionConfig,
     CapacityReservationConfig,
     ConfigurationError,
@@ -218,16 +219,62 @@ def _parse_attention_capability(value: object, path: str) -> DecodeAttentionCapa
 
 def _parse_ffn_capability(value: object, path: str) -> DecodeFFNCapabilityConfig:
     raw = _mapping(value, path)
-    _fields(raw, path, {"model", "tokens_per_second"})
-    return DecodeFFNCapabilityConfig(
-        model=_enum(raw["model"], f"{path}.model", ExpertModel),
-        tokens_per_second=_number(
-            raw["tokens_per_second"],
-            f"{path}.tokens_per_second",
-            minimum=0,
-            strict_minimum=True,
-        ),
-    )
+    if "model" not in raw:
+        raise ConfigurationError(f"{path}: missing required field(s): model")
+    model = _enum(raw["model"], f"{path}.model", ExpertModel)
+    if model is ExpertModel.LINEAR_EXPERT_BATCH:
+        _fields(raw, path, {"model", "tokens_per_second"})
+        return DecodeFFNCapabilityConfig(
+            model=model,
+            tokens_per_second=_number(
+                raw["tokens_per_second"],
+                f"{path}.tokens_per_second",
+                minimum=0,
+                strict_minimum=True,
+            ),
+        )
+
+    _fields(raw, path, {"model", "points"})
+    points_raw = _sequence(raw["points"], f"{path}.points")
+    if len(points_raw) < 2:
+        raise ConfigurationError(f"{path}.points: must contain at least two points")
+    points: list[BatchLatencyPointConfig] = []
+    for index, value in enumerate(points_raw):
+        point_path = f"{path}.points[{index}]"
+        point_raw = _mapping(value, point_path)
+        _fields(point_raw, point_path, {"activation_tokens", "latency_us"})
+        points.append(
+            BatchLatencyPointConfig(
+                activation_tokens=_integer(
+                    point_raw["activation_tokens"],
+                    f"{point_path}.activation_tokens",
+                    minimum=0,
+                ),
+                latency_us=_number(
+                    point_raw["latency_us"],
+                    f"{point_path}.latency_us",
+                    minimum=0,
+                ),
+            )
+        )
+    if points[0].activation_tokens != 0 or points[0].latency_us != 0.0:
+        raise ConfigurationError(
+            f"{path}.points: first point must be activation_tokens=0, latency_us=0"
+        )
+    for previous, current in zip(points, points[1:]):
+        if current.activation_tokens <= previous.activation_tokens:
+            raise ConfigurationError(
+                f"{path}.points: activation_tokens must be strictly increasing"
+            )
+        if current.latency_us < previous.latency_us:
+            raise ConfigurationError(
+                f"{path}.points: latency_us must be nondecreasing"
+            )
+    if points[-1].latency_us <= points[-2].latency_us:
+        raise ConfigurationError(
+            f"{path}.points: final segment must have positive slope"
+        )
+    return DecodeFFNCapabilityConfig(model=model, points=tuple(points))
 
 
 def load_hardware_config(path: str | Path) -> HardwareConfig:

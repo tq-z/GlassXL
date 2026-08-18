@@ -22,6 +22,7 @@ class AttentionModel(StrEnum):
 
 class ExpertModel(StrEnum):
     LINEAR_EXPERT_BATCH = "linear_expert_batch"
+    BATCH_LATENCY_CURVE = "batch_latency_curve"
 
 
 class AllToAllModel(StrEnum):
@@ -75,9 +76,16 @@ class DecodeAttentionCapabilityConfig:
 
 
 @dataclass(frozen=True)
+class BatchLatencyPointConfig:
+    activation_tokens: int
+    latency_us: float
+
+
+@dataclass(frozen=True)
 class DecodeFFNCapabilityConfig:
     model: ExpertModel
-    tokens_per_second: float
+    tokens_per_second: float | None = None
+    points: tuple[BatchLatencyPointConfig, ...] = ()
 
 
 @dataclass(frozen=True)

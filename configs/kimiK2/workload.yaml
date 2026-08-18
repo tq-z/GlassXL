@@ -1,0 +1,55 @@
+# Workload schema. Implemented schema_version values: 1.
+schema_version: 1
+
+# Seed for all synthetic workload draws; any integer is valid.
+seed: 7
+
+# Optional; defaults to null (run until the event calendar is empty).
+# When present, this finite simulation horizon is in seconds and must be >= 0.
+simulation_end_s: 10000
+
+source:
+  # Implemented source types: synthetic.
+  type: synthetic
+  # Number of sessions to generate; must be a non-negative integer.
+  # Eight keeps the checked-in end-to-end example fast enough for a smoke run.
+  num_sessions: 8
+
+  arrival:
+    # Implemented arrival types: poisson.
+    type: poisson
+    # Mean arrival rate in sessions/s; must be finite and > 0.
+    rate_per_second: 1.0
+
+  # Integer-valued distribution types implemented for turns and token counts:
+  # constant, bounded_integer, discrete.
+  turns:
+    type: constant
+    # Exact turns per session; draws must be integers >= 1.
+    value: 2
+
+  # Initial warm context already stored in the KV pool at session arrival.
+  context_tokens:
+    type: bounded_integer
+    min: 4096
+    max: 8192
+
+  # Incremental prefill input. The first observed turn may draw a nonzero value.
+  prefill_tokens:
+    type: bounded_integer
+    min: 128
+    max: 512
+
+  # Exact oracle output length used by attention capacity admission.
+  output_tokens:
+    type: bounded_integer
+    min: 64
+    max: 256
+
+  # Numeric distribution types implemented for tool wait:
+  # constant, bounded_integer, discrete, uniform, exponential, lognormal.
+  # For lognormal only, optional min and max default to no lower/upper clipping.
+  tool_wait_ms:
+    type: constant
+    # Tool wait in milliseconds; draws must be finite and >= 0.
+    value: 100

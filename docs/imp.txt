@@ -38,3 +38,19 @@ The config for now is not clear. I want to split the HW side workload side and m
 10. yes 
 
 what else is unclaer? 
+
+
+Help me impelment an lightwight roofline model to mimic the roofline model for some MoE models prefill qps, decode FFN's QPS, decode attn's  context_token_per_second. THis doesn't have to be precise but need to align the  hardware.yaml's input for my simulator. It just eat the HW's FLOPS and memory BW. 
+This should also consider the DP and EP number as input. The prefill node can be assumed as a single node. 
+Give me the perlayer and all layer preformance numbers.  Perlayer means that some model different layer may behavior differently, combine the same layers and give me the #layer. 
+
+This should be a super coarse approximation to run my agentic_sim. Write a document to list the approximation and which are ignored in your model. 
+
+
+I will use this model as some base to write a wrapper script to generate the hardware.yaml and mapping.yaml. The wrapper should be generate_conifg.py in scripts folder. The interconnection part should be given in the wrapper as well. The token-size relative numbers will be generated given Model. 
+
+The model need to supports include 
+[GLM5.2, DeepSeek-V4, Kimi K3, Qwen3.8-2.4T, GLM-4.5, DeepSeek-V3, Kimi-K2,  QWEN3-235B]
+Do the online search like huggingface for the model details.
+
+Ask me question if unsure something. 

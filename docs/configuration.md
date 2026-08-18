@@ -79,8 +79,15 @@ not overlap.
 | YAML path | Type | Req. | Default | Unit | Allowed / validation | Equation or runtime effect and relationships |
 |---|---|---:|---|---|---|---|
 | `devices[].capabilities.decode_ffn` | mapping | conditional | — | — | required to map the device for FFN | Selects the expert-compute service model. |
-| `...decode_ffn.model` | string | yes | — | — | `linear_expert_batch` | V1 uses the per-device expert-work interface. |
-| `...decode_ffn.tokens_per_second` | number | yes | — | routed activation tokens/s | finite and > 0 | For resident expert batches, `T = sum(B_e) / rate`. The per-device job is atomic. |
+| `...decode_ffn.model` | string | yes | — | — | `linear_expert_batch`, `batch_latency_curve` | Selects a scalar rate or batch-sensitive per-device expert-work model. |
+| `...decode_ffn.tokens_per_second` | number | conditional | — | routed activation tokens/s | required and finite > 0 only for `linear_expert_batch` | For resident expert batches, `T = sum(B_e) / rate`. |
+| `...decode_ffn.points` | list | conditional | — | — | required only for `batch_latency_curve`; at least two points | Piecewise-linear latency as a function of total routed activations on this EP device. |
+| `...decode_ffn.points[].activation_tokens` | integer | yes | — | routed activation tokens | first value 0; strictly increasing and >= 0 | `top_k` has already been applied by the runtime. |
+| `...decode_ffn.points[].latency_us` | number | yes | — | microseconds | first value 0; finite, non-negative, and nondecreasing; final segment has positive slope | Exact at breakpoints, linearly interpolated between points, and extrapolated using the final segment. |
+
+The two FFN variants are mutually strict: a scalar model rejects `points`, and
+a curve model rejects `tokens_per_second`. Each FFN device still submits one
+atomic whole-model job and participates in the same global FFN barrier.
 
 ### KV pool
 

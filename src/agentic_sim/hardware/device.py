@@ -7,12 +7,13 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 from enum import StrEnum
 
-from agentic_sim.config.models import DeviceConfig
+from agentic_sim.config.models import DeviceConfig, ExpertModel
 from agentic_sim.core.resource import FCFSResource, Reservation
 from agentic_sim.hardware.compute_models import (
     AggregatePrefillLatencyModel,
     AttentionLatencyModel,
     AttentionWork,
+    BatchLatencyCurveExpertModel,
     ExpertComputeLatencyModel,
     ExpertWork,
     LinearAttentionLatencyModel,
@@ -98,6 +99,21 @@ class Device:
         """Construct capability models from one typed hardware device record."""
 
         capabilities = config.capabilities
+        expert_model: ExpertComputeLatencyModel | None = None
+        if capabilities.decode_ffn is not None:
+            if capabilities.decode_ffn.model is ExpertModel.LINEAR_EXPERT_BATCH:
+                if capabilities.decode_ffn.tokens_per_second is None:
+                    raise ValueError("linear expert capability is missing tokens_per_second")
+                expert_model = LinearExpertBatchLatencyModel(
+                    capabilities.decode_ffn.tokens_per_second
+                )
+            else:
+                expert_model = BatchLatencyCurveExpertModel(
+                    tuple(
+                        (point.activation_tokens, point.latency_us / 1_000_000.0)
+                        for point in capabilities.decode_ffn.points
+                    )
+                )
         return cls(
             device_id=config.id,
             prefill_model=(
@@ -110,11 +126,7 @@ class Device:
                 if capabilities.decode_attn is not None
                 else None
             ),
-            expert_model=(
-                LinearExpertBatchLatencyModel(capabilities.decode_ffn.tokens_per_second)
-                if capabilities.decode_ffn is not None
-                else None
-            ),
+            expert_model=expert_model,
             attention_kv_capacity_tokens=(
                 capabilities.decode_attn.kv_capacity_tokens
                 if capabilities.decode_attn is not None

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+from bisect import bisect_left
 from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Protocol, runtime_checkable
@@ -171,3 +172,58 @@ class LinearExpertBatchLatencyModel:
     ) -> float:
         del context
         return sum(work.activation_tokens for work in expert_batches) / self.tokens_per_second
+
+
+@dataclass(frozen=True)
+class BatchLatencyCurveExpertModel:
+    """Piecewise-linear whole-model latency indexed by local routed activations."""
+
+    points: tuple[tuple[int, float], ...]
+
+    def __post_init__(self) -> None:
+        if len(self.points) < 2:
+            raise ValueError("points must contain at least two points")
+        if self.points[0] != (0, 0.0):
+            raise ValueError("first point must be (0, 0.0)")
+        for (previous_tokens, previous_latency), (tokens, latency) in zip(
+            self.points,
+            self.points[1:],
+        ):
+            _nonnegative_integer(previous_tokens, "activation_tokens")
+            _nonnegative_integer(tokens, "activation_tokens")
+            if tokens <= previous_tokens:
+                raise ValueError("activation_tokens must be strictly increasing")
+            if not math.isfinite(previous_latency) or previous_latency < 0.0:
+                raise ValueError("latency must be finite and non-negative")
+            if not math.isfinite(latency) or latency < previous_latency:
+                raise ValueError("latency must be finite and nondecreasing")
+        if self.points[-1][1] <= self.points[-2][1]:
+            raise ValueError("final curve segment must have positive slope")
+
+    @staticmethod
+    def _interpolate(
+        tokens: int,
+        left: tuple[int, float],
+        right: tuple[int, float],
+    ) -> float:
+        left_tokens, left_latency = left
+        right_tokens, right_latency = right
+        fraction = (tokens - left_tokens) / (right_tokens - left_tokens)
+        return left_latency + fraction * (right_latency - left_latency)
+
+    def latency_s(
+        self,
+        expert_batches: Sequence[ExpertWork],
+        context: StageContext,
+    ) -> float:
+        del context
+        tokens = sum(work.activation_tokens for work in expert_batches)
+        if tokens == 0:
+            return 0.0
+        token_points = tuple(point[0] for point in self.points)
+        index = bisect_left(token_points, tokens)
+        if index < len(self.points) and self.points[index][0] == tokens:
+            return self.points[index][1]
+        if index == len(self.points):
+            return self._interpolate(tokens, self.points[-2], self.points[-1])
+        return self._interpolate(tokens, self.points[index - 1], self.points[index])

@@ -1,0 +1,44 @@
+# Mapping schema. Implemented schema_version values: 1.
+schema_version: 1
+
+# Implemented execution granularities: decode_step.
+granularity: decode_step
+
+# Logical model shape. V1 rates summarize all layers and run once per decode step.
+model:
+  # Positive model identity value; it does not multiply V1 service times.
+  num_layers: 32
+  # Positive expert count. Every expert ID in [0, num_experts) needs one owner.
+  num_experts: 8
+  # Positive experts selected per token; must not exceed num_experts.
+  top_k: 2
+
+prefill:
+  # Non-empty unique IDs of hardware devices with the prefill capability.
+  device_ids: [0]
+  # Implemented prefill states: stateful, stateless.
+  state: stateful
+  # Implemented prefill placements: sticky_round_robin, round_robin.
+  # stateful requires sticky_round_robin; stateless requires round_robin.
+  placement: sticky_round_robin
+
+decode_attn:
+  # Non-empty unique IDs of hardware devices with the decode_attn capability.
+  device_ids: [1, 2]
+  # Implemented attention placements: round_robin, least_active_context.
+  placement: least_active_context
+  # Implemented attention residency policies: active_only, lru_cache.
+  residency: lru_cache
+  capacity_reservation:
+    # Implemented capacity-reservation models: oracle_output.
+    model: oracle_output
+
+decode_ffn:
+  # Non-empty unique IDs of hardware devices with the decode_ffn capability.
+  # The number of IDs is N_EP; it is independent of num_experts.
+  device_ids: [3, 4]
+  # Each listed FFN device must own at least one expert. Expert IDs must be
+  # in range, covered exactly once, and cannot be replicated in V1.
+  experts_by_device:
+    3: [0, 1, 2, 3]
+    4: [4, 5, 6, 7]
