@@ -24,6 +24,7 @@ from roofline_model import (  # noqa: E402
     OperatingPoint,
     PhaseEstimate,
     PrecisionSpec,
+    PhaseHardwareSpec,
     estimate_model,
     resolve_model,
     supported_models,
@@ -35,6 +36,12 @@ YAML_INPUT_KEYS = {
     "model",
     "device_flops_per_second",
     "device_memory_bandwidth_bytes_per_second",
+    "prefill_device_flops_per_second",
+    "prefill_device_memory_bandwidth_bytes_per_second",
+    "decode_attn_device_flops_per_second",
+    "decode_attn_device_memory_bandwidth_bytes_per_second",
+    "decode_ffn_device_flops_per_second",
+    "decode_ffn_device_memory_bandwidth_bytes_per_second",
     "dp",
     "ep",
     "prefill_tokens",
@@ -88,6 +95,26 @@ def build_parser() -> argparse.ArgumentParser:
         "--device-memory-bandwidth-bytes-per-second",
         type=_positive_float,
     )
+    parser.add_argument(
+        "--prefill-device-flops-per-second", type=_positive_float
+    )
+    parser.add_argument(
+        "--prefill-device-memory-bandwidth-bytes-per-second", type=_positive_float
+    )
+    parser.add_argument(
+        "--decode-attn-device-flops-per-second", type=_positive_float
+    )
+    parser.add_argument(
+        "--decode-attn-device-memory-bandwidth-bytes-per-second",
+        type=_positive_float,
+    )
+    parser.add_argument(
+        "--decode-ffn-device-flops-per-second", type=_positive_float
+    )
+    parser.add_argument(
+        "--decode-ffn-device-memory-bandwidth-bytes-per-second",
+        type=_positive_float,
+    )
     parser.add_argument("--dp", type=_positive_int)
     parser.add_argument("--ep", type=_positive_int)
     parser.add_argument("--prefill-tokens", type=_positive_int)
@@ -132,6 +159,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--config-yaml",
         "--config",
         dest="input_yaml",
+        default="./configs/kimiK2/roofline_generator.yaml",
         type=Path,
         help="YAML file containing CLI destination keys; explicit flags override it",
     )
@@ -174,8 +202,23 @@ def merge_input_yaml(args: argparse.Namespace) -> argparse.Namespace:
         if values.get(key) is None:
             values[key] = value
 
+    for phase in ("prefill", "decode_attn", "decode_ffn"):
+        phase_flops = f"{phase}_device_flops_per_second"
+        phase_bandwidth = f"{phase}_device_memory_bandwidth_bytes_per_second"
+        if values.get(phase_flops) is None:
+            values[phase_flops] = values.get("device_flops_per_second")
+        if values.get(phase_bandwidth) is None:
+            values[phase_bandwidth] = values.get(
+                "device_memory_bandwidth_bytes_per_second"
+            )
+
     required = (
-        "model", "device_flops_per_second", "device_memory_bandwidth_bytes_per_second",
+        "model", "prefill_device_flops_per_second",
+        "prefill_device_memory_bandwidth_bytes_per_second",
+        "decode_attn_device_flops_per_second",
+        "decode_attn_device_memory_bandwidth_bytes_per_second",
+        "decode_ffn_device_flops_per_second",
+        "decode_ffn_device_memory_bandwidth_bytes_per_second",
         "dp", "ep", "prefill_tokens", "decode_context_tokens",
         "attn_kv_capacity_bytes", "ffn_all_to_all_bandwidth_bytes_per_second",
         "ffn_all_to_all_start_latency_us", "ffn_all_to_all_min_payload_bytes",
@@ -191,8 +234,14 @@ def merge_input_yaml(args: argparse.Namespace) -> argparse.Namespace:
         )
 
     for key in (
-        "device_flops_per_second", "device_memory_bandwidth_bytes_per_second",
-        "ffn_all_to_all_bandwidth_bytes_per_second", "kv_p2p_bandwidth_bytes_per_second",
+        "prefill_device_flops_per_second",
+        "prefill_device_memory_bandwidth_bytes_per_second",
+        "decode_attn_device_flops_per_second",
+        "decode_attn_device_memory_bandwidth_bytes_per_second",
+        "decode_ffn_device_flops_per_second",
+        "decode_ffn_device_memory_bandwidth_bytes_per_second",
+        "ffn_all_to_all_bandwidth_bytes_per_second",
+        "kv_p2p_bandwidth_bytes_per_second",
         "kv_pool_bandwidth_bytes_per_second",
     ):
         values[key] = _positive_float(str(values[key]))
@@ -350,9 +399,19 @@ def build_documents(
     if args.colocate_attn_ffn and args.dp != args.ep:
         raise ValueError("--colocate-attn-ffn requires --dp and --ep to be equal")
 
-    hardware_spec = HardwareSpec(
-        args.device_flops_per_second,
-        args.device_memory_bandwidth_bytes_per_second,
+    hardware_spec = PhaseHardwareSpec(
+        prefill=HardwareSpec(
+            args.prefill_device_flops_per_second,
+            args.prefill_device_memory_bandwidth_bytes_per_second,
+        ),
+        decode_attention=HardwareSpec(
+            args.decode_attn_device_flops_per_second,
+            args.decode_attn_device_memory_bandwidth_bytes_per_second,
+        ),
+        decode_ffn=HardwareSpec(
+            args.decode_ffn_device_flops_per_second,
+            args.decode_ffn_device_memory_bandwidth_bytes_per_second,
+        ),
     )
     precision = PrecisionSpec(
         args.weight_bytes, args.activation_bytes, args.kv_bytes
@@ -382,6 +441,10 @@ def build_documents(
     all_to_all_rate = (
         args.ffn_all_to_all_bandwidth_bytes_per_second
         / estimate.routed_activation_bytes
+        / model.num_layers
+    )
+    all_to_all_start_latency_us = (
+        args.ffn_all_to_all_start_latency_us * model.num_layers
     )
     min_package_tokens = math.ceil(
         args.ffn_all_to_all_min_payload_bytes
@@ -433,7 +496,7 @@ def build_documents(
         "interconnects": {
             "ffn_all_to_all": {
                 "model": "startup_min_package",
-                "start_latency_us": args.ffn_all_to_all_start_latency_us,
+                "start_latency_us": all_to_all_start_latency_us,
                 "min_package_tokens": min_package_tokens,
                 "throughput_tokens_per_second": all_to_all_rate,
             },

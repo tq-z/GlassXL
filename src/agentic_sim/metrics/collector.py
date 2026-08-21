@@ -166,12 +166,24 @@ class MetricsCollector:
             for batch, reservation in zip(result.expert_batches, result.ffn, strict=True)
         )
         loads = tuple(item.activation_tokens for item in device_metrics)
+        attention_time_s = result.attention_barrier_s - result.batch.ready_time_s
+        ffn_time_s = result.ffn_barrier_s - result.dispatch.finish_time
+        ffn_all_to_all_time_s = (
+            result.dispatch.finish_time - result.attention_barrier_s
+            + result.combine.finish_time - result.ffn_barrier_s
+        )
         self.decode_steps.append(
             DecodeStepMetric(
                 decode_step=result.decode_step,
                 ready_time_s=result.batch.ready_time_s,
+                session_ids=tuple(
+                    session.session_id for session in result.batch.sessions
+                ),
                 finish_time_s=result.token_completion_time_s,
                 active_sessions=result.batch.size,
+                attention_time_s=attention_time_s,
+                ffn_time_s=ffn_time_s,
+                ffn_all_to_all_time_s=ffn_all_to_all_time_s,
                 attention_barrier_s=result.attention_barrier_s,
                 attention_device_wait_s=tuple(
                     (reservation.device_id, result.attention_barrier_s - reservation.finish_time)

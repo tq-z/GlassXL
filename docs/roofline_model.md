@@ -32,10 +32,27 @@ destination names. A fully commented example is
 ```
 
 All required numeric inputs shown in the example may also be supplied as flags.
-When both sources provide a value, the explicit command-line flag takes
-precedence. `--config` and `--config-yaml` are aliases for `--input-yaml`.
-Unknown YAML keys are rejected, and the same positivity/finite-value checks as
-the CLI are applied after merging.
+Prefill, decode attention, and decode FFN each accept their own effective
+per-device FLOP/s and memory-bandwidth rates:
+
+```text
+prefill_device_flops_per_second
+prefill_device_memory_bandwidth_bytes_per_second
+decode_attn_device_flops_per_second
+decode_attn_device_memory_bandwidth_bytes_per_second
+decode_ffn_device_flops_per_second
+decode_ffn_device_memory_bandwidth_bytes_per_second
+```
+
+The corresponding CLI names use hyphens. The legacy shared
+`device_flops_per_second` and
+`device_memory_bandwidth_bytes_per_second` inputs remain compatibility
+shorthands: each supplies any phase-specific value that was omitted. An
+explicit phase value always wins. When both YAML and the command line provide
+the same input, the explicit command-line flag takes precedence. `--config`
+and `--config-yaml` are aliases for `--input-yaml`. Unknown YAML keys are
+rejected, and the same positivity/finite-value checks as the CLI are applied
+after merging.
 
 ## Supported model registry
 
@@ -69,7 +86,9 @@ time         = max(compute_time, memory_time)
 ```
 
 There is no implicit utilization factor. Precision widths default to two bytes
-for weights, activations, and KV, and can be overridden independently.
+for weights, activations, and KV, and can be overridden independently. The
+roofline uses the phase's supplied effective rates, so one device can have
+different calibrated utilization for prefill, attention, and expert GEMMs.
 
 ### Prefill
 

@@ -1,0 +1,54 @@
+# Input file for scripts/generate_config.py.
+#
+# Keys use the same snake_case names as the CLI option destinations.  Every
+# value below can instead be supplied as a command-line flag.  If both are
+# present, the explicit command-line flag wins.
+
+# Canonical aliases include: GLM5.2, DeepSeek-V4, Kimi K3, Qwen3.8-2.4T,
+# GLM-4.5, DeepSeek-V3, Kimi-K2, and QWEN3-235B.
+model: Kimi-K2
+
+# Effective usable per-device rates. Units are decimal SI: FLOP/s and bytes/s.
+# They are separate because prefill, attention, and expert GEMMs can reach
+# different effective utilization on the same nominal hardware.
+prefill_device_flops_per_second: 16e15 # 8*2PFLOS
+prefill_device_memory_bandwidth_bytes_per_second: 1.0e18 # Large enough to not be a bottleneck.
+decode_attn_device_flops_per_second: 1.0e15
+decode_attn_device_memory_bandwidth_bytes_per_second: 64.0e12
+decode_ffn_device_flops_per_second: 1.0e15
+decode_ffn_device_memory_bandwidth_bytes_per_second: 64.0e12
+
+# Deployment and calibration operating points.
+dp: 64                         # Decode-attention replicas.
+ep: 64                         # FFN expert-parallel devices.
+prefill_tokens: 4096          # New incremental tokens processed by prefill.
+decode_context_tokens: 1048576  # Existing prefill context and decode reference C.
+
+# Device memory budget used only to derive attention KV capacity in tokens.
+attn_kv_capacity_bytes: 8.0e10
+
+# FFN dispatch/combine fabric.  The payload floor is in bytes here and is
+# converted to routed activation tokens using the selected model's width.
+ffn_all_to_all_bandwidth_bytes_per_second: 16e12
+ffn_all_to_all_start_latency_us: 20
+ffn_all_to_all_min_payload_bytes: 67108864
+
+# KV transfer and backing-pool links.  These byte rates are converted using
+# the model's effective KV bytes per context token.
+kv_p2p_bandwidth_bytes_per_second: 900e9
+kv_p2p_start_latency_us: 5
+kv_pool_bandwidth_bytes_per_second: 200e9
+kv_pool_start_latency_us: 10
+
+# Output location.  The generator writes hardware.yaml, mapping.yaml, and
+# roofline_report.yaml into this directory.
+output_dir: /mnt/bravo/tiz014/PanAgretti/configs/kimiK2/GlassML-NMP1M
+
+# Optional precision widths; BF16-style two-byte values are the defaults.
+weight_bytes: 2
+activation_bytes: 2
+kv_bytes: 2
+
+# Optional placement/output controls.
+colocate_attn_ffn: false     # Requires dp == ep when enabled.
+force: true                 # Set true, or pass --force, to replace outputs.

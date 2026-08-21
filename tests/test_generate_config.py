@@ -66,8 +66,9 @@ def test_token_byte_conversions_and_report_totals(tmp_path) -> None:
     assert conversions["routed_activation_bytes_per_token"] == 3584 * 2
     assert math.isclose(
         hardware["interconnects"]["ffn_all_to_all"]["throughput_tokens_per_second"],
-        4e11 / (3584 * 2),
+        4e11 / (3584 * 2) / 93,
     )
+    assert hardware["interconnects"]["ffn_all_to_all"]["start_latency_us"] == 5 * 93
     assert hardware["interconnects"]["ffn_all_to_all"]["min_package_tokens"] == math.ceil(
         16384 / (3584 * 2)
     )
@@ -139,6 +140,30 @@ def test_yaml_input_loads_and_cli_overrides(tmp_path) -> None:
     assert overridden.model == "QWEN3-235B"
     assert overridden.dp == 1
 
+
+
+def test_phase_specific_effective_rates_are_kept_separate(tmp_path) -> None:
+    args = arguments(tmp_path, "kimi-k2")
+    args.device_flops_per_second = None
+    args.device_memory_bandwidth_bytes_per_second = None
+    args.prefill_device_flops_per_second = 1.0e15
+    args.prefill_device_memory_bandwidth_bytes_per_second = 3.0e12
+    args.decode_attn_device_flops_per_second = 6.0e14
+    args.decode_attn_device_memory_bandwidth_bytes_per_second = 3.2e12
+    args.decode_ffn_device_flops_per_second = 8.0e14
+    args.decode_ffn_device_memory_bandwidth_bytes_per_second = 2.8e12
+
+    _, _, report = build_documents(args)
+    phase_hardware = report["inputs"]["hardware"]
+    assert phase_hardware["prefill"]["flops_per_second"] == 1.0e15
+    assert phase_hardware["decode_attention"]["flops_per_second"] == 6.0e14
+    assert phase_hardware["decode_attention"][
+        "memory_bandwidth_bytes_per_second"
+    ] == 3.2e12
+    assert phase_hardware["decode_ffn"]["flops_per_second"] == 8.0e14
+    assert phase_hardware["decode_ffn"][
+        "memory_bandwidth_bytes_per_second"
+    ] == 2.8e12
 
 def test_yaml_input_rejects_unknown_keys_and_missing_values(tmp_path) -> None:
     unknown_path = tmp_path / "unknown.yaml"

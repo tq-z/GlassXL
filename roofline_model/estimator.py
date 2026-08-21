@@ -21,6 +21,13 @@ class HardwareSpec:
         )
 
 
+
+@dataclass(frozen=True)
+class PhaseHardwareSpec:
+    prefill: HardwareSpec
+    decode_attention: HardwareSpec
+    decode_ffn: HardwareSpec
+
 @dataclass(frozen=True)
 class PrecisionSpec:
     weight_bytes: float = 2.0
@@ -99,7 +106,7 @@ class FFNCurveSet:
 @dataclass(frozen=True)
 class ModelEstimate:
     model: ModelSpec
-    hardware: HardwareSpec
+    hardware: PhaseHardwareSpec
     precision: PrecisionSpec
     deployment: DeploymentSpec
     operating_point: OperatingPoint
@@ -642,26 +649,31 @@ def kv_token_size(
 
 def estimate_model(
     model: str | ModelSpec,
-    hardware: HardwareSpec,
+    hardware: HardwareSpec | PhaseHardwareSpec,
     precision: PrecisionSpec,
     deployment: DeploymentSpec,
     operating_point: OperatingPoint,
 ) -> ModelEstimate:
     spec = resolve_model(model) if isinstance(model, str) else model
+    phase_hardware = (
+        hardware
+        if isinstance(hardware, PhaseHardwareSpec)
+        else PhaseHardwareSpec(hardware, hardware, hardware)
+    )
     if deployment.ep > spec.num_experts:
         raise ValueError(
             f"ep={deployment.ep} exceeds routed expert count {spec.num_experts}"
         )
     prefill_groups, prefill_all = estimate_prefill(
         spec,
-        hardware,
+        phase_hardware.prefill,
         precision,
         operating_point.prefill_tokens,
         operating_point.decode_context_tokens,
     )
     attention_groups, attention_all = estimate_decode_attention(
         spec,
-        hardware,
+        phase_hardware.decode_attention,
         precision,
         operating_point.decode_context_tokens,
     )
@@ -683,7 +695,7 @@ def estimate_model(
                 local_experts=local_experts,
                 all_layers=build_ffn_curve(
                     spec,
-                    hardware,
+                    phase_hardware.decode_ffn,
                     precision,
                     deployment,
                     local_experts,
@@ -693,7 +705,7 @@ def estimate_model(
                         group.name,
                         build_ffn_curve(
                             spec,
-                            hardware,
+                            phase_hardware.decode_ffn,
                             precision,
                             deployment,
                             local_experts,
@@ -712,7 +724,7 @@ def estimate_model(
     )
     return ModelEstimate(
         model=spec,
-        hardware=hardware,
+        hardware=phase_hardware,
         precision=precision,
         deployment=deployment,
         operating_point=operating_point,

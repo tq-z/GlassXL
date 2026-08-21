@@ -1,0 +1,2495 @@
+schema_version: 1
+model:
+  requested_alias: Kimi-K2
+  canonical_key: kimi-k2
+  display_name: Kimi-K2-Instruct
+  official_sources:
+  - https://huggingface.co/moonshotai/Kimi-K2-Instruct/blob/main/config.json
+  num_main_layers: 61
+  num_routed_experts: 384
+  top_k: 8
+  num_shared_experts: 1
+  hidden_size: 7168
+  routed_expert_input_width: 7168
+  excluded:
+  - vision towers
+  - MTP/speculative auxiliary layers
+inputs:
+  hardware:
+    prefill:
+      flops_per_second: 1.6e+16
+      memory_bandwidth_bytes_per_second: 1.0e+18
+    decode_attention:
+      flops_per_second: 2000000000000000.0
+      memory_bandwidth_bytes_per_second: 8000000000000.0
+    decode_ffn:
+      flops_per_second: 2000000000000000.0
+      memory_bandwidth_bytes_per_second: 8000000000000.0
+  precision:
+    weight_bytes: 2.0
+    activation_bytes: 2.0
+    kv_bytes: 2.0
+  deployment:
+    dp: 64
+    ep: 64
+  operating_point:
+    prefill_tokens: 4096
+    decode_context_tokens: 1048576
+  effective_rates: true
+  si_units: decimal
+token_conversions:
+  routed_activation_bytes_per_token: 14336.0
+  growing_kv_elements_per_model_token: 35136.0
+  fixed_state_elements_per_session: 0.0
+  effective_kv_bytes_per_model_token_at_reference_context: 70272.0
+  attention_kv_capacity_tokens: 1138433
+  ffn_all_to_all_tokens_per_second: 731850.1170960187
+  ffn_all_to_all_min_package_tokens: 4682
+  kv_p2p_tokens_per_second: 12807377.049180327
+  kv_pool_tokens_per_second: 2846083.7887067394
+layer_groups:
+- name: MLA + dense FFN
+  layer_count: 1
+  layer_indices: '0'
+  attention_kind: mla_full
+  ffn_kind: dense
+  prefill:
+    per_layer:
+      flops: 391859578863616.0
+      bytes: 4958815649792.0
+      compute_latency_s: 0.024491223678976
+      memory_latency_s: 4.958815649792e-06
+      latency_s: 0.024491223678976
+      tokens_per_second: 167243.58299483947
+      bottleneck: compute_assumed
+    all_group_layers:
+      flops: 391859578863616.0
+      bytes: 4958815649792.0
+      compute_latency_s: 0.024491223678976
+      memory_latency_s: 4.958815649792e-06
+      latency_s: 0.024491223678976
+      tokens_per_second: 167243.58299483947
+      bottleneck: compute_assumed
+  decode_attention:
+    per_layer:
+      flops: 94691524608.0
+      bytes: 1410260992.0
+      compute_latency_s: 4.7345762304e-05
+      memory_latency_s: 0.000176282624
+      latency_s: 0.000176282624
+      tokens_per_second: 5948266347.566962
+      bottleneck: memory
+    all_group_layers:
+      flops: 94691524608.0
+      bytes: 1410260992.0
+      compute_latency_s: 4.7345762304e-05
+      memory_latency_s: 0.000176282624
+      latency_s: 0.000176282624
+      tokens_per_second: 5948266347.566962
+      bottleneck: memory
+  decode_ffn_all_group_layers:
+    6:
+      local_routed_experts: 6
+      points:
+      - activation_tokens: 0
+        latency_s: 0.0
+        tokens_per_second: null
+      - activation_tokens: 1
+        latency_s: 1.550688e-06
+        tokens_per_second: 644875.0490105038
+      - activation_tokens: 2
+        latency_s: 1.553088e-06
+        tokens_per_second: 1287757.0363044464
+      - activation_tokens: 3
+        latency_s: 1.555488e-06
+        tokens_per_second: 1928655.1873109918
+      - activation_tokens: 4
+        latency_s: 1.557888e-06
+        tokens_per_second: 2567578.6706104674
+      - activation_tokens: 5
+        latency_s: 1.560288e-06
+        tokens_per_second: 3204536.5983715826
+      - activation_tokens: 6
+        latency_s: 1.562688e-06
+        tokens_per_second: 3839538.0267846175
+      - activation_tokens: 32
+        latency_s: 1.625088e-06
+        tokens_per_second: 19691241.33585381
+      - activation_tokens: 33
+        latency_s: 1.634992128e-06
+        tokens_per_second: 20183583.41600529
+      - activation_tokens: 34
+        latency_s: 1.684537344e-06
+        tokens_per_second: 20183583.41600529
+      - activation_tokens: 37
+        latency_s: 1.833172992e-06
+        tokens_per_second: 20183583.41600529
+      - activation_tokens: 38
+        latency_s: 1.882718208e-06
+        tokens_per_second: 20183583.41600529
+      - activation_tokens: 39
+        latency_s: 1.932263424e-06
+        tokens_per_second: 20183583.41600529
+      - activation_tokens: 1779
+        latency_s: 8.8140939264e-05
+        tokens_per_second: 20183583.41600529
+      - activation_tokens: 1780
+        latency_s: 8.819048448e-05
+        tokens_per_second: 20183583.41600529
+      - activation_tokens: 1781
+        latency_s: 8.8240029696e-05
+        tokens_per_second: 20183583.41600529
+      - activation_tokens: 3562
+        latency_s: 0.000176480059392
+        tokens_per_second: 20183583.41600529
+      - activation_tokens: 7124
+        latency_s: 0.000352960118784
+        tokens_per_second: 20183583.41600529
+- name: MLA + MoE
+  layer_count: 60
+  layer_indices: 1-60
+  attention_kind: mla_full
+  ffn_kind: moe
+  prefill:
+    per_layer:
+      flops: 391859578863616.0
+      bytes: 4958815649792.0
+      compute_latency_s: 0.024491223678976
+      memory_latency_s: 4.958815649792e-06
+      latency_s: 0.024491223678976
+      tokens_per_second: 167243.58299483947
+      bottleneck: compute_assumed
+    all_group_layers:
+      flops: 2.351157473181696e+16
+      bytes: 297528938987520.0
+      compute_latency_s: 1.46947342073856
+      memory_latency_s: 0.00029752893898752
+      latency_s: 1.46947342073856
+      tokens_per_second: 2787.393049913991
+      bottleneck: compute_assumed
+  decode_attention:
+    per_layer:
+      flops: 94691524608.0
+      bytes: 1410260992.0
+      compute_latency_s: 4.7345762304e-05
+      memory_latency_s: 0.000176282624
+      latency_s: 0.000176282624
+      tokens_per_second: 5948266347.566962
+      bottleneck: memory
+    all_group_layers:
+      flops: 5681491476480.0
+      bytes: 84615659520.0
+      compute_latency_s: 0.00284074573824
+      memory_latency_s: 0.01057695744
+      latency_s: 0.01057695744
+      tokens_per_second: 99137772.45944937
+      bottleneck: memory
+  decode_ffn_all_group_layers:
+    6:
+      local_routed_experts: 6
+      points:
+      - activation_tokens: 0
+        latency_s: 0.0
+        tokens_per_second: null
+      - activation_tokens: 1
+        latency_s: 0.00067139136
+        tokens_per_second: 1489.444249029359
+      - activation_tokens: 2
+        latency_s: 0.0013324608
+        tokens_per_second: 1500.982242779675
+      - activation_tokens: 3
+        latency_s: 0.00199353024
+        tokens_per_second: 1504.8680676145648
+      - activation_tokens: 4
+        latency_s: 0.00265459968
+        tokens_per_second: 1506.818534687686
+      - activation_tokens: 5
+        latency_s: 0.00331566912
+        tokens_per_second: 1507.9912437101082
+      - activation_tokens: 6
+        latency_s: 0.003976738560000001
+        tokens_per_second: 1508.7740643428162
+      - activation_tokens: 32
+        latency_s: 0.00398886912
+        tokens_per_second: 8022.323881110443
+      - activation_tokens: 33
+        latency_s: 0.00398933568
+        tokens_per_second: 8272.053957615319
+      - activation_tokens: 34
+        latency_s: 0.00398980224
+        tokens_per_second: 8521.725628185523
+      - activation_tokens: 37
+        latency_s: 0.0039912019200000004
+        tokens_per_second: 9270.39040911265
+      - activation_tokens: 38
+        latency_s: 0.00399192809472
+        tokens_per_second: 9519.2095394357
+      - activation_tokens: 39
+        latency_s: 0.00399267311616
+        tokens_per_second: 9767.892052607778
+      - activation_tokens: 1779
+        latency_s: 0.00528901042176
+        tokens_per_second: 336357.8170844311
+      - activation_tokens: 1780
+        latency_s: 0.0052914290688
+        tokens_per_second: 336393.0569334215
+      - activation_tokens: 1781
+        latency_s: 0.005294401781759999
+        tokens_per_second: 336393.0569334215
+      - activation_tokens: 3562
+        latency_s: 0.010588803563519999
+        tokens_per_second: 336393.0569334215
+      - activation_tokens: 7124
+        latency_s: 0.021177607127039998
+        tokens_per_second: 336393.0569334215
+all_layers:
+  prefill:
+    flops: 2.3903434310680576e+16
+    bytes: 302487754637312.0
+    compute_latency_s: 1.493964644417536
+    memory_latency_s: 0.000302487754637312
+    latency_s: 1.493964644417536
+    tokens_per_second: 2741.698081882614
+    bottleneck: compute_assumed
+  decode_attention_per_device:
+    flops: 5776183001088.0
+    bytes: 86025920512.0
+    compute_latency_s: 0.002888091500544
+    memory_latency_s: 0.010753240064
+    latency_s: 0.010753240064
+    tokens_per_second: 97512563.07486822
+    bottleneck: memory
+  decode_attention_dp_aggregate_context_tokens_per_second: 6240804036.791566
+  decode_ffn_per_device_curves:
+    6:
+      local_routed_experts: 6
+      points:
+      - activation_tokens: 0
+        latency_s: 0.0
+        tokens_per_second: null
+      - activation_tokens: 1
+        latency_s: 0.000672942048
+        tokens_per_second: 1486.012061472491
+      - activation_tokens: 2
+        latency_s: 0.001334013888
+        tokens_per_second: 1499.2347665873776
+      - activation_tokens: 3
+        latency_s: 0.0019950857280000003
+        tokens_per_second: 1503.6947825832974
+      - activation_tokens: 4
+        latency_s: 0.002656157568
+        tokens_per_second: 1505.9347563525266
+      - activation_tokens: 5
+        latency_s: 0.003317229408
+        tokens_per_second: 1507.281946778159
+      - activation_tokens: 6
+        latency_s: 0.003978301248000001
+        tokens_per_second: 1508.1814136162668
+      - activation_tokens: 32
+        latency_s: 0.003990494208000001
+        tokens_per_second: 8019.056871664552
+      - activation_tokens: 33
+        latency_s: 0.003990970672128
+        tokens_per_second: 8268.665122112832
+      - activation_tokens: 34
+        latency_s: 0.003991486777344
+        tokens_per_second: 8518.129182585983
+      - activation_tokens: 37
+        latency_s: 0.003993035092992
+        tokens_per_second: 9266.134441176604
+      - activation_tokens: 38
+        latency_s: 0.003993810812928
+        tokens_per_second: 9514.722098751818
+      - activation_tokens: 39
+        latency_s: 0.0039946053795840005
+        tokens_per_second: 9763.16714520158
+      - activation_tokens: 1779
+        latency_s: 0.005377151361024001
+        tokens_per_second: 330844.32268263603
+      - activation_tokens: 1780
+        latency_s: 0.0053796195532799995
+        tokens_per_second: 330878.41665582446
+      - activation_tokens: 1781
+        latency_s: 0.005382641811455999
+        tokens_per_second: 330878.41665582446
+      - activation_tokens: 3562
+        latency_s: 0.010765283622911999
+        tokens_per_second: 330878.41665582446
+      - activation_tokens: 7124
+        latency_s: 0.021530567245823997
+        tokens_per_second: 330878.41665582446
+  decode_ffn_ep_barrier_summary:
+  - original_decode_tokens: 1
+    total_routed_activations: 8
+    barrier_latency_s: 0.003978301248000001
+    original_tokens_per_second: 251.3635689360445
+    devices:
+    - device_id: 65
+      routed_activation_tokens: 6
+      latency_s: 0.003978301248000001
+    - device_id: 66
+      routed_activation_tokens: 2
+      latency_s: 0.001334013888
+    - device_id: 67
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 68
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 69
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 70
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 71
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 72
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 73
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 74
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 75
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 76
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 77
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 78
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 79
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 80
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 81
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 82
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 83
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 84
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 85
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 86
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 87
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 88
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 89
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 90
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 91
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 92
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 93
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 94
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 95
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 96
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 97
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 98
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 99
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 100
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 101
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 102
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 103
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 104
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 105
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 106
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 107
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 108
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 109
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 110
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 111
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 112
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 113
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 114
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 115
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 116
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 117
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 118
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 119
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 120
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 121
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 122
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 123
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 124
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 125
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 126
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 127
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 128
+      routed_activation_tokens: 0
+      latency_s: 0.0
+  - original_decode_tokens: 2
+    total_routed_activations: 16
+    barrier_latency_s: 0.003978301248000001
+    original_tokens_per_second: 502.727137872089
+    devices:
+    - device_id: 65
+      routed_activation_tokens: 6
+      latency_s: 0.003978301248000001
+    - device_id: 66
+      routed_activation_tokens: 6
+      latency_s: 0.003978301248000001
+    - device_id: 67
+      routed_activation_tokens: 4
+      latency_s: 0.002656157568
+    - device_id: 68
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 69
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 70
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 71
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 72
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 73
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 74
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 75
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 76
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 77
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 78
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 79
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 80
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 81
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 82
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 83
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 84
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 85
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 86
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 87
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 88
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 89
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 90
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 91
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 92
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 93
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 94
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 95
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 96
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 97
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 98
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 99
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 100
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 101
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 102
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 103
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 104
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 105
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 106
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 107
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 108
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 109
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 110
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 111
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 112
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 113
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 114
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 115
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 116
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 117
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 118
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 119
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 120
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 121
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 122
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 123
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 124
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 125
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 126
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 127
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 128
+      routed_activation_tokens: 0
+      latency_s: 0.0
+  - original_decode_tokens: 4
+    total_routed_activations: 32
+    barrier_latency_s: 0.003978301248000001
+    original_tokens_per_second: 1005.454275744178
+    devices:
+    - device_id: 65
+      routed_activation_tokens: 6
+      latency_s: 0.003978301248000001
+    - device_id: 66
+      routed_activation_tokens: 6
+      latency_s: 0.003978301248000001
+    - device_id: 67
+      routed_activation_tokens: 6
+      latency_s: 0.003978301248000001
+    - device_id: 68
+      routed_activation_tokens: 6
+      latency_s: 0.003978301248000001
+    - device_id: 69
+      routed_activation_tokens: 6
+      latency_s: 0.003978301248000001
+    - device_id: 70
+      routed_activation_tokens: 2
+      latency_s: 0.001334013888
+    - device_id: 71
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 72
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 73
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 74
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 75
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 76
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 77
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 78
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 79
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 80
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 81
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 82
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 83
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 84
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 85
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 86
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 87
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 88
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 89
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 90
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 91
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 92
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 93
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 94
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 95
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 96
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 97
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 98
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 99
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 100
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 101
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 102
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 103
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 104
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 105
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 106
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 107
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 108
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 109
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 110
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 111
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 112
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 113
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 114
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 115
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 116
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 117
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 118
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 119
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 120
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 121
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 122
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 123
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 124
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 125
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 126
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 127
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 128
+      routed_activation_tokens: 0
+      latency_s: 0.0
+  - original_decode_tokens: 8
+    total_routed_activations: 64
+    barrier_latency_s: 0.003978301248000001
+    original_tokens_per_second: 2010.908551488356
+    devices:
+    - device_id: 65
+      routed_activation_tokens: 6
+      latency_s: 0.003978301248000001
+    - device_id: 66
+      routed_activation_tokens: 6
+      latency_s: 0.003978301248000001
+    - device_id: 67
+      routed_activation_tokens: 6
+      latency_s: 0.003978301248000001
+    - device_id: 68
+      routed_activation_tokens: 6
+      latency_s: 0.003978301248000001
+    - device_id: 69
+      routed_activation_tokens: 6
+      latency_s: 0.003978301248000001
+    - device_id: 70
+      routed_activation_tokens: 6
+      latency_s: 0.003978301248000001
+    - device_id: 71
+      routed_activation_tokens: 6
+      latency_s: 0.003978301248000001
+    - device_id: 72
+      routed_activation_tokens: 6
+      latency_s: 0.003978301248000001
+    - device_id: 73
+      routed_activation_tokens: 6
+      latency_s: 0.003978301248000001
+    - device_id: 74
+      routed_activation_tokens: 6
+      latency_s: 0.003978301248000001
+    - device_id: 75
+      routed_activation_tokens: 4
+      latency_s: 0.002656157568
+    - device_id: 76
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 77
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 78
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 79
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 80
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 81
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 82
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 83
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 84
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 85
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 86
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 87
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 88
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 89
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 90
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 91
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 92
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 93
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 94
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 95
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 96
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 97
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 98
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 99
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 100
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 101
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 102
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 103
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 104
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 105
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 106
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 107
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 108
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 109
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 110
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 111
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 112
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 113
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 114
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 115
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 116
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 117
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 118
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 119
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 120
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 121
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 122
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 123
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 124
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 125
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 126
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 127
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 128
+      routed_activation_tokens: 0
+      latency_s: 0.0
+  - original_decode_tokens: 16
+    total_routed_activations: 128
+    barrier_latency_s: 0.003978301248000001
+    original_tokens_per_second: 4021.817102976712
+    devices:
+    - device_id: 65
+      routed_activation_tokens: 6
+      latency_s: 0.003978301248000001
+    - device_id: 66
+      routed_activation_tokens: 6
+      latency_s: 0.003978301248000001
+    - device_id: 67
+      routed_activation_tokens: 6
+      latency_s: 0.003978301248000001
+    - device_id: 68
+      routed_activation_tokens: 6
+      latency_s: 0.003978301248000001
+    - device_id: 69
+      routed_activation_tokens: 6
+      latency_s: 0.003978301248000001
+    - device_id: 70
+      routed_activation_tokens: 6
+      latency_s: 0.003978301248000001
+    - device_id: 71
+      routed_activation_tokens: 6
+      latency_s: 0.003978301248000001
+    - device_id: 72
+      routed_activation_tokens: 6
+      latency_s: 0.003978301248000001
+    - device_id: 73
+      routed_activation_tokens: 6
+      latency_s: 0.003978301248000001
+    - device_id: 74
+      routed_activation_tokens: 6
+      latency_s: 0.003978301248000001
+    - device_id: 75
+      routed_activation_tokens: 6
+      latency_s: 0.003978301248000001
+    - device_id: 76
+      routed_activation_tokens: 6
+      latency_s: 0.003978301248000001
+    - device_id: 77
+      routed_activation_tokens: 6
+      latency_s: 0.003978301248000001
+    - device_id: 78
+      routed_activation_tokens: 6
+      latency_s: 0.003978301248000001
+    - device_id: 79
+      routed_activation_tokens: 6
+      latency_s: 0.003978301248000001
+    - device_id: 80
+      routed_activation_tokens: 6
+      latency_s: 0.003978301248000001
+    - device_id: 81
+      routed_activation_tokens: 6
+      latency_s: 0.003978301248000001
+    - device_id: 82
+      routed_activation_tokens: 6
+      latency_s: 0.003978301248000001
+    - device_id: 83
+      routed_activation_tokens: 6
+      latency_s: 0.003978301248000001
+    - device_id: 84
+      routed_activation_tokens: 6
+      latency_s: 0.003978301248000001
+    - device_id: 85
+      routed_activation_tokens: 6
+      latency_s: 0.003978301248000001
+    - device_id: 86
+      routed_activation_tokens: 2
+      latency_s: 0.001334013888
+    - device_id: 87
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 88
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 89
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 90
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 91
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 92
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 93
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 94
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 95
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 96
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 97
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 98
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 99
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 100
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 101
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 102
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 103
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 104
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 105
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 106
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 107
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 108
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 109
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 110
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 111
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 112
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 113
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 114
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 115
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 116
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 117
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 118
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 119
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 120
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 121
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 122
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 123
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 124
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 125
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 126
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 127
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 128
+      routed_activation_tokens: 0
+      latency_s: 0.0
+  - original_decode_tokens: 32
+    total_routed_activations: 256
+    barrier_latency_s: 0.003978301248000001
+    original_tokens_per_second: 8043.634205953424
+    devices:
+    - device_id: 65
+      routed_activation_tokens: 6
+      latency_s: 0.003978301248000001
+    - device_id: 66
+      routed_activation_tokens: 6
+      latency_s: 0.003978301248000001
+    - device_id: 67
+      routed_activation_tokens: 6
+      latency_s: 0.003978301248000001
+    - device_id: 68
+      routed_activation_tokens: 6
+      latency_s: 0.003978301248000001
+    - device_id: 69
+      routed_activation_tokens: 6
+      latency_s: 0.003978301248000001
+    - device_id: 70
+      routed_activation_tokens: 6
+      latency_s: 0.003978301248000001
+    - device_id: 71
+      routed_activation_tokens: 6
+      latency_s: 0.003978301248000001
+    - device_id: 72
+      routed_activation_tokens: 6
+      latency_s: 0.003978301248000001
+    - device_id: 73
+      routed_activation_tokens: 6
+      latency_s: 0.003978301248000001
+    - device_id: 74
+      routed_activation_tokens: 6
+      latency_s: 0.003978301248000001
+    - device_id: 75
+      routed_activation_tokens: 6
+      latency_s: 0.003978301248000001
+    - device_id: 76
+      routed_activation_tokens: 6
+      latency_s: 0.003978301248000001
+    - device_id: 77
+      routed_activation_tokens: 6
+      latency_s: 0.003978301248000001
+    - device_id: 78
+      routed_activation_tokens: 6
+      latency_s: 0.003978301248000001
+    - device_id: 79
+      routed_activation_tokens: 6
+      latency_s: 0.003978301248000001
+    - device_id: 80
+      routed_activation_tokens: 6
+      latency_s: 0.003978301248000001
+    - device_id: 81
+      routed_activation_tokens: 6
+      latency_s: 0.003978301248000001
+    - device_id: 82
+      routed_activation_tokens: 6
+      latency_s: 0.003978301248000001
+    - device_id: 83
+      routed_activation_tokens: 6
+      latency_s: 0.003978301248000001
+    - device_id: 84
+      routed_activation_tokens: 6
+      latency_s: 0.003978301248000001
+    - device_id: 85
+      routed_activation_tokens: 6
+      latency_s: 0.003978301248000001
+    - device_id: 86
+      routed_activation_tokens: 6
+      latency_s: 0.003978301248000001
+    - device_id: 87
+      routed_activation_tokens: 6
+      latency_s: 0.003978301248000001
+    - device_id: 88
+      routed_activation_tokens: 6
+      latency_s: 0.003978301248000001
+    - device_id: 89
+      routed_activation_tokens: 6
+      latency_s: 0.003978301248000001
+    - device_id: 90
+      routed_activation_tokens: 6
+      latency_s: 0.003978301248000001
+    - device_id: 91
+      routed_activation_tokens: 6
+      latency_s: 0.003978301248000001
+    - device_id: 92
+      routed_activation_tokens: 6
+      latency_s: 0.003978301248000001
+    - device_id: 93
+      routed_activation_tokens: 6
+      latency_s: 0.003978301248000001
+    - device_id: 94
+      routed_activation_tokens: 6
+      latency_s: 0.003978301248000001
+    - device_id: 95
+      routed_activation_tokens: 6
+      latency_s: 0.003978301248000001
+    - device_id: 96
+      routed_activation_tokens: 6
+      latency_s: 0.003978301248000001
+    - device_id: 97
+      routed_activation_tokens: 6
+      latency_s: 0.003978301248000001
+    - device_id: 98
+      routed_activation_tokens: 6
+      latency_s: 0.003978301248000001
+    - device_id: 99
+      routed_activation_tokens: 6
+      latency_s: 0.003978301248000001
+    - device_id: 100
+      routed_activation_tokens: 6
+      latency_s: 0.003978301248000001
+    - device_id: 101
+      routed_activation_tokens: 6
+      latency_s: 0.003978301248000001
+    - device_id: 102
+      routed_activation_tokens: 6
+      latency_s: 0.003978301248000001
+    - device_id: 103
+      routed_activation_tokens: 6
+      latency_s: 0.003978301248000001
+    - device_id: 104
+      routed_activation_tokens: 6
+      latency_s: 0.003978301248000001
+    - device_id: 105
+      routed_activation_tokens: 6
+      latency_s: 0.003978301248000001
+    - device_id: 106
+      routed_activation_tokens: 6
+      latency_s: 0.003978301248000001
+    - device_id: 107
+      routed_activation_tokens: 4
+      latency_s: 0.002656157568
+    - device_id: 108
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 109
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 110
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 111
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 112
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 113
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 114
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 115
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 116
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 117
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 118
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 119
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 120
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 121
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 122
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 123
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 124
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 125
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 126
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 127
+      routed_activation_tokens: 0
+      latency_s: 0.0
+    - device_id: 128
+      routed_activation_tokens: 0
+      latency_s: 0.0
+  - original_decode_tokens: 64
+    total_routed_activations: 512
+    barrier_latency_s: 0.003981115008000001
+    original_tokens_per_second: 16075.898302709867
+    devices:
+    - device_id: 65
+      routed_activation_tokens: 12
+      latency_s: 0.003981115008000001
+    - device_id: 66
+      routed_activation_tokens: 12
+      latency_s: 0.003981115008000001
+    - device_id: 67
+      routed_activation_tokens: 12
+      latency_s: 0.003981115008000001
+    - device_id: 68
+      routed_activation_tokens: 12
+      latency_s: 0.003981115008000001
+    - device_id: 69
+      routed_activation_tokens: 12
+      latency_s: 0.003981115008000001
+    - device_id: 70
+      routed_activation_tokens: 12
+      latency_s: 0.003981115008000001
+    - device_id: 71
+      routed_activation_tokens: 12
+      latency_s: 0.003981115008000001
+    - device_id: 72
+      routed_activation_tokens: 12
+      latency_s: 0.003981115008000001
+    - device_id: 73
+      routed_activation_tokens: 12
+      latency_s: 0.003981115008000001
+    - device_id: 74
+      routed_activation_tokens: 12
+      latency_s: 0.003981115008000001
+    - device_id: 75
+      routed_activation_tokens: 12
+      latency_s: 0.003981115008000001
+    - device_id: 76
+      routed_activation_tokens: 12
+      latency_s: 0.003981115008000001
+    - device_id: 77
+      routed_activation_tokens: 12
+      latency_s: 0.003981115008000001
+    - device_id: 78
+      routed_activation_tokens: 12
+      latency_s: 0.003981115008000001
+    - device_id: 79
+      routed_activation_tokens: 12
+      latency_s: 0.003981115008000001
+    - device_id: 80
+      routed_activation_tokens: 12
+      latency_s: 0.003981115008000001
+    - device_id: 81
+      routed_activation_tokens: 12
+      latency_s: 0.003981115008000001
+    - device_id: 82
+      routed_activation_tokens: 12
+      latency_s: 0.003981115008000001
+    - device_id: 83
+      routed_activation_tokens: 12
+      latency_s: 0.003981115008000001
+    - device_id: 84
+      routed_activation_tokens: 12
+      latency_s: 0.003981115008000001
+    - device_id: 85
+      routed_activation_tokens: 12
+      latency_s: 0.003981115008000001
+    - device_id: 86
+      routed_activation_tokens: 8
+      latency_s: 0.003979239168000001
+    - device_id: 87
+      routed_activation_tokens: 6
+      latency_s: 0.003978301248000001
+    - device_id: 88
+      routed_activation_tokens: 6
+      latency_s: 0.003978301248000001
+    - device_id: 89
+      routed_activation_tokens: 6
+      latency_s: 0.003978301248000001
+    - device_id: 90
+      routed_activation_tokens: 6
+      latency_s: 0.003978301248000001
+    - device_id: 91
+      routed_activation_tokens: 6
+      latency_s: 0.003978301248000001
+    - device_id: 92
+      routed_activation_tokens: 6
+      latency_s: 0.003978301248000001
+    - device_id: 93
+      routed_activation_tokens: 6
+      latency_s: 0.003978301248000001
+    - device_id: 94
+      routed_activation_tokens: 6
+      latency_s: 0.003978301248000001
+    - device_id: 95
+      routed_activation_tokens: 6
+      latency_s: 0.003978301248000001
+    - device_id: 96
+      routed_activation_tokens: 6
+      latency_s: 0.003978301248000001
+    - device_id: 97
+      routed_activation_tokens: 6
+      latency_s: 0.003978301248000001
+    - device_id: 98
+      routed_activation_tokens: 6
+      latency_s: 0.003978301248000001
+    - device_id: 99
+      routed_activation_tokens: 6
+      latency_s: 0.003978301248000001
+    - device_id: 100
+      routed_activation_tokens: 6
+      latency_s: 0.003978301248000001
+    - device_id: 101
+      routed_activation_tokens: 6
+      latency_s: 0.003978301248000001
+    - device_id: 102
+      routed_activation_tokens: 6
+      latency_s: 0.003978301248000001
+    - device_id: 103
+      routed_activation_tokens: 6
+      latency_s: 0.003978301248000001
+    - device_id: 104
+      routed_activation_tokens: 6
+      latency_s: 0.003978301248000001
+    - device_id: 105
+      routed_activation_tokens: 6
+      latency_s: 0.003978301248000001
+    - device_id: 106
+      routed_activation_tokens: 6
+      latency_s: 0.003978301248000001
+    - device_id: 107
+      routed_activation_tokens: 6
+      latency_s: 0.003978301248000001
+    - device_id: 108
+      routed_activation_tokens: 6
+      latency_s: 0.003978301248000001
+    - device_id: 109
+      routed_activation_tokens: 6
+      latency_s: 0.003978301248000001
+    - device_id: 110
+      routed_activation_tokens: 6
+      latency_s: 0.003978301248000001
+    - device_id: 111
+      routed_activation_tokens: 6
+      latency_s: 0.003978301248000001
+    - device_id: 112
+      routed_activation_tokens: 6
+      latency_s: 0.003978301248000001
+    - device_id: 113
+      routed_activation_tokens: 6
+      latency_s: 0.003978301248000001
+    - device_id: 114
+      routed_activation_tokens: 6
+      latency_s: 0.003978301248000001
+    - device_id: 115
+      routed_activation_tokens: 6
+      latency_s: 0.003978301248000001
+    - device_id: 116
+      routed_activation_tokens: 6
+      latency_s: 0.003978301248000001
+    - device_id: 117
+      routed_activation_tokens: 6
+      latency_s: 0.003978301248000001
+    - device_id: 118
+      routed_activation_tokens: 6
+      latency_s: 0.003978301248000001
+    - device_id: 119
+      routed_activation_tokens: 6
+      latency_s: 0.003978301248000001
+    - device_id: 120
+      routed_activation_tokens: 6
+      latency_s: 0.003978301248000001
+    - device_id: 121
+      routed_activation_tokens: 6
+      latency_s: 0.003978301248000001
+    - device_id: 122
+      routed_activation_tokens: 6
+      latency_s: 0.003978301248000001
+    - device_id: 123
+      routed_activation_tokens: 6
+      latency_s: 0.003978301248000001
+    - device_id: 124
+      routed_activation_tokens: 6
+      latency_s: 0.003978301248000001
+    - device_id: 125
+      routed_activation_tokens: 6
+      latency_s: 0.003978301248000001
+    - device_id: 126
+      routed_activation_tokens: 6
+      latency_s: 0.003978301248000001
+    - device_id: 127
+      routed_activation_tokens: 6
+      latency_s: 0.003978301248000001
+    - device_id: 128
+      routed_activation_tokens: 6
+      latency_s: 0.003978301248000001
+  - original_decode_tokens: 128
+    total_routed_activations: 1024
+    barrier_latency_s: 0.003983928768000001
+    original_tokens_per_second: 32129.088508843535
+    devices:
+    - device_id: 65
+      routed_activation_tokens: 18
+      latency_s: 0.003983928768000001
+    - device_id: 66
+      routed_activation_tokens: 18
+      latency_s: 0.003983928768000001
+    - device_id: 67
+      routed_activation_tokens: 18
+      latency_s: 0.003983928768000001
+    - device_id: 68
+      routed_activation_tokens: 18
+      latency_s: 0.003983928768000001
+    - device_id: 69
+      routed_activation_tokens: 18
+      latency_s: 0.003983928768000001
+    - device_id: 70
+      routed_activation_tokens: 18
+      latency_s: 0.003983928768000001
+    - device_id: 71
+      routed_activation_tokens: 18
+      latency_s: 0.003983928768000001
+    - device_id: 72
+      routed_activation_tokens: 18
+      latency_s: 0.003983928768000001
+    - device_id: 73
+      routed_activation_tokens: 18
+      latency_s: 0.003983928768000001
+    - device_id: 74
+      routed_activation_tokens: 18
+      latency_s: 0.003983928768000001
+    - device_id: 75
+      routed_activation_tokens: 18
+      latency_s: 0.003983928768000001
+    - device_id: 76
+      routed_activation_tokens: 18
+      latency_s: 0.003983928768000001
+    - device_id: 77
+      routed_activation_tokens: 18
+      latency_s: 0.003983928768000001
+    - device_id: 78
+      routed_activation_tokens: 18
+      latency_s: 0.003983928768000001
+    - device_id: 79
+      routed_activation_tokens: 18
+      latency_s: 0.003983928768000001
+    - device_id: 80
+      routed_activation_tokens: 18
+      latency_s: 0.003983928768000001
+    - device_id: 81
+      routed_activation_tokens: 18
+      latency_s: 0.003983928768000001
+    - device_id: 82
+      routed_activation_tokens: 18
+      latency_s: 0.003983928768000001
+    - device_id: 83
+      routed_activation_tokens: 18
+      latency_s: 0.003983928768000001
+    - device_id: 84
+      routed_activation_tokens: 18
+      latency_s: 0.003983928768000001
+    - device_id: 85
+      routed_activation_tokens: 18
+      latency_s: 0.003983928768000001
+    - device_id: 86
+      routed_activation_tokens: 18
+      latency_s: 0.003983928768000001
+    - device_id: 87
+      routed_activation_tokens: 18
+      latency_s: 0.003983928768000001
+    - device_id: 88
+      routed_activation_tokens: 18
+      latency_s: 0.003983928768000001
+    - device_id: 89
+      routed_activation_tokens: 18
+      latency_s: 0.003983928768000001
+    - device_id: 90
+      routed_activation_tokens: 18
+      latency_s: 0.003983928768000001
+    - device_id: 91
+      routed_activation_tokens: 18
+      latency_s: 0.003983928768000001
+    - device_id: 92
+      routed_activation_tokens: 18
+      latency_s: 0.003983928768000001
+    - device_id: 93
+      routed_activation_tokens: 18
+      latency_s: 0.003983928768000001
+    - device_id: 94
+      routed_activation_tokens: 18
+      latency_s: 0.003983928768000001
+    - device_id: 95
+      routed_activation_tokens: 18
+      latency_s: 0.003983928768000001
+    - device_id: 96
+      routed_activation_tokens: 18
+      latency_s: 0.003983928768000001
+    - device_id: 97
+      routed_activation_tokens: 18
+      latency_s: 0.003983928768000001
+    - device_id: 98
+      routed_activation_tokens: 18
+      latency_s: 0.003983928768000001
+    - device_id: 99
+      routed_activation_tokens: 18
+      latency_s: 0.003983928768000001
+    - device_id: 100
+      routed_activation_tokens: 18
+      latency_s: 0.003983928768000001
+    - device_id: 101
+      routed_activation_tokens: 18
+      latency_s: 0.003983928768000001
+    - device_id: 102
+      routed_activation_tokens: 18
+      latency_s: 0.003983928768000001
+    - device_id: 103
+      routed_activation_tokens: 18
+      latency_s: 0.003983928768000001
+    - device_id: 104
+      routed_activation_tokens: 18
+      latency_s: 0.003983928768000001
+    - device_id: 105
+      routed_activation_tokens: 18
+      latency_s: 0.003983928768000001
+    - device_id: 106
+      routed_activation_tokens: 18
+      latency_s: 0.003983928768000001
+    - device_id: 107
+      routed_activation_tokens: 16
+      latency_s: 0.003982990848000001
+    - device_id: 108
+      routed_activation_tokens: 12
+      latency_s: 0.003981115008000001
+    - device_id: 109
+      routed_activation_tokens: 12
+      latency_s: 0.003981115008000001
+    - device_id: 110
+      routed_activation_tokens: 12
+      latency_s: 0.003981115008000001
+    - device_id: 111
+      routed_activation_tokens: 12
+      latency_s: 0.003981115008000001
+    - device_id: 112
+      routed_activation_tokens: 12
+      latency_s: 0.003981115008000001
+    - device_id: 113
+      routed_activation_tokens: 12
+      latency_s: 0.003981115008000001
+    - device_id: 114
+      routed_activation_tokens: 12
+      latency_s: 0.003981115008000001
+    - device_id: 115
+      routed_activation_tokens: 12
+      latency_s: 0.003981115008000001
+    - device_id: 116
+      routed_activation_tokens: 12
+      latency_s: 0.003981115008000001
+    - device_id: 117
+      routed_activation_tokens: 12
+      latency_s: 0.003981115008000001
+    - device_id: 118
+      routed_activation_tokens: 12
+      latency_s: 0.003981115008000001
+    - device_id: 119
+      routed_activation_tokens: 12
+      latency_s: 0.003981115008000001
+    - device_id: 120
+      routed_activation_tokens: 12
+      latency_s: 0.003981115008000001
+    - device_id: 121
+      routed_activation_tokens: 12
+      latency_s: 0.003981115008000001
+    - device_id: 122
+      routed_activation_tokens: 12
+      latency_s: 0.003981115008000001
+    - device_id: 123
+      routed_activation_tokens: 12
+      latency_s: 0.003981115008000001
+    - device_id: 124
+      routed_activation_tokens: 12
+      latency_s: 0.003981115008000001
+    - device_id: 125
+      routed_activation_tokens: 12
+      latency_s: 0.003981115008000001
+    - device_id: 126
+      routed_activation_tokens: 12
+      latency_s: 0.003981115008000001
+    - device_id: 127
+      routed_activation_tokens: 12
+      latency_s: 0.003981115008000001
+    - device_id: 128
+      routed_activation_tokens: 12
+      latency_s: 0.003981115008000001
+  - original_decode_tokens: 256
+    total_routed_activations: 2048
+    barrier_latency_s: 0.003992518987776
+    original_tokens_per_second: 64119.920477223
+    devices:
+    - device_id: 65
+      routed_activation_tokens: 36
+      latency_s: 0.003992518987776
+    - device_id: 66
+      routed_activation_tokens: 36
+      latency_s: 0.003992518987776
+    - device_id: 67
+      routed_activation_tokens: 36
+      latency_s: 0.003992518987776
+    - device_id: 68
+      routed_activation_tokens: 36
+      latency_s: 0.003992518987776
+    - device_id: 69
+      routed_activation_tokens: 36
+      latency_s: 0.003992518987776
+    - device_id: 70
+      routed_activation_tokens: 36
+      latency_s: 0.003992518987776
+    - device_id: 71
+      routed_activation_tokens: 36
+      latency_s: 0.003992518987776
+    - device_id: 72
+      routed_activation_tokens: 36
+      latency_s: 0.003992518987776
+    - device_id: 73
+      routed_activation_tokens: 36
+      latency_s: 0.003992518987776
+    - device_id: 74
+      routed_activation_tokens: 36
+      latency_s: 0.003992518987776
+    - device_id: 75
+      routed_activation_tokens: 36
+      latency_s: 0.003992518987776
+    - device_id: 76
+      routed_activation_tokens: 36
+      latency_s: 0.003992518987776
+    - device_id: 77
+      routed_activation_tokens: 36
+      latency_s: 0.003992518987776
+    - device_id: 78
+      routed_activation_tokens: 36
+      latency_s: 0.003992518987776
+    - device_id: 79
+      routed_activation_tokens: 36
+      latency_s: 0.003992518987776
+    - device_id: 80
+      routed_activation_tokens: 36
+      latency_s: 0.003992518987776
+    - device_id: 81
+      routed_activation_tokens: 36
+      latency_s: 0.003992518987776
+    - device_id: 82
+      routed_activation_tokens: 36
+      latency_s: 0.003992518987776
+    - device_id: 83
+      routed_activation_tokens: 36
+      latency_s: 0.003992518987776
+    - device_id: 84
+      routed_activation_tokens: 36
+      latency_s: 0.003992518987776
+    - device_id: 85
+      routed_activation_tokens: 36
+      latency_s: 0.003992518987776
+    - device_id: 86
+      routed_activation_tokens: 32
+      latency_s: 0.003990494208000001
+    - device_id: 87
+      routed_activation_tokens: 30
+      latency_s: 0.003989556288000001
+    - device_id: 88
+      routed_activation_tokens: 30
+      latency_s: 0.003989556288000001
+    - device_id: 89
+      routed_activation_tokens: 30
+      latency_s: 0.003989556288000001
+    - device_id: 90
+      routed_activation_tokens: 30
+      latency_s: 0.003989556288000001
+    - device_id: 91
+      routed_activation_tokens: 30
+      latency_s: 0.003989556288000001
+    - device_id: 92
+      routed_activation_tokens: 30
+      latency_s: 0.003989556288000001
+    - device_id: 93
+      routed_activation_tokens: 30
+      latency_s: 0.003989556288000001
+    - device_id: 94
+      routed_activation_tokens: 30
+      latency_s: 0.003989556288000001
+    - device_id: 95
+      routed_activation_tokens: 30
+      latency_s: 0.003989556288000001
+    - device_id: 96
+      routed_activation_tokens: 30
+      latency_s: 0.003989556288000001
+    - device_id: 97
+      routed_activation_tokens: 30
+      latency_s: 0.003989556288000001
+    - device_id: 98
+      routed_activation_tokens: 30
+      latency_s: 0.003989556288000001
+    - device_id: 99
+      routed_activation_tokens: 30
+      latency_s: 0.003989556288000001
+    - device_id: 100
+      routed_activation_tokens: 30
+      latency_s: 0.003989556288000001
+    - device_id: 101
+      routed_activation_tokens: 30
+      latency_s: 0.003989556288000001
+    - device_id: 102
+      routed_activation_tokens: 30
+      latency_s: 0.003989556288000001
+    - device_id: 103
+      routed_activation_tokens: 30
+      latency_s: 0.003989556288000001
+    - device_id: 104
+      routed_activation_tokens: 30
+      latency_s: 0.003989556288000001
+    - device_id: 105
+      routed_activation_tokens: 30
+      latency_s: 0.003989556288000001
+    - device_id: 106
+      routed_activation_tokens: 30
+      latency_s: 0.003989556288000001
+    - device_id: 107
+      routed_activation_tokens: 30
+      latency_s: 0.003989556288000001
+    - device_id: 108
+      routed_activation_tokens: 30
+      latency_s: 0.003989556288000001
+    - device_id: 109
+      routed_activation_tokens: 30
+      latency_s: 0.003989556288000001
+    - device_id: 110
+      routed_activation_tokens: 30
+      latency_s: 0.003989556288000001
+    - device_id: 111
+      routed_activation_tokens: 30
+      latency_s: 0.003989556288000001
+    - device_id: 112
+      routed_activation_tokens: 30
+      latency_s: 0.003989556288000001
+    - device_id: 113
+      routed_activation_tokens: 30
+      latency_s: 0.003989556288000001
+    - device_id: 114
+      routed_activation_tokens: 30
+      latency_s: 0.003989556288000001
+    - device_id: 115
+      routed_activation_tokens: 30
+      latency_s: 0.003989556288000001
+    - device_id: 116
+      routed_activation_tokens: 30
+      latency_s: 0.003989556288000001
+    - device_id: 117
+      routed_activation_tokens: 30
+      latency_s: 0.003989556288000001
+    - device_id: 118
+      routed_activation_tokens: 30
+      latency_s: 0.003989556288000001
+    - device_id: 119
+      routed_activation_tokens: 30
+      latency_s: 0.003989556288000001
+    - device_id: 120
+      routed_activation_tokens: 30
+      latency_s: 0.003989556288000001
+    - device_id: 121
+      routed_activation_tokens: 30
+      latency_s: 0.003989556288000001
+    - device_id: 122
+      routed_activation_tokens: 30
+      latency_s: 0.003989556288000001
+    - device_id: 123
+      routed_activation_tokens: 30
+      latency_s: 0.003989556288000001
+    - device_id: 124
+      routed_activation_tokens: 30
+      latency_s: 0.003989556288000001
+    - device_id: 125
+      routed_activation_tokens: 30
+      latency_s: 0.003989556288000001
+    - device_id: 126
+      routed_activation_tokens: 30
+      latency_s: 0.003989556288000001
+    - device_id: 127
+      routed_activation_tokens: 30
+      latency_s: 0.003989556288000001
+    - device_id: 128
+      routed_activation_tokens: 30
+      latency_s: 0.003989556288000001
+  - original_decode_tokens: 512
+    total_routed_activations: 4096
+    barrier_latency_s: 0.004016058679296001
+    original_tokens_per_second: 127488.17706262987
+    devices:
+    - device_id: 65
+      routed_activation_tokens: 66
+      latency_s: 0.004016058679296001
+    - device_id: 66
+      routed_activation_tokens: 66
+      latency_s: 0.004016058679296001
+    - device_id: 67
+      routed_activation_tokens: 66
+      latency_s: 0.004016058679296001
+    - device_id: 68
+      routed_activation_tokens: 66
+      latency_s: 0.004016058679296001
+    - device_id: 69
+      routed_activation_tokens: 66
+      latency_s: 0.004016058679296001
+    - device_id: 70
+      routed_activation_tokens: 66
+      latency_s: 0.004016058679296001
+    - device_id: 71
+      routed_activation_tokens: 66
+      latency_s: 0.004016058679296001
+    - device_id: 72
+      routed_activation_tokens: 66
+      latency_s: 0.004016058679296001
+    - device_id: 73
+      routed_activation_tokens: 66
+      latency_s: 0.004016058679296001
+    - device_id: 74
+      routed_activation_tokens: 66
+      latency_s: 0.004016058679296001
+    - device_id: 75
+      routed_activation_tokens: 66
+      latency_s: 0.004016058679296001
+    - device_id: 76
+      routed_activation_tokens: 66
+      latency_s: 0.004016058679296001
+    - device_id: 77
+      routed_activation_tokens: 66
+      latency_s: 0.004016058679296001
+    - device_id: 78
+      routed_activation_tokens: 66
+      latency_s: 0.004016058679296001
+    - device_id: 79
+      routed_activation_tokens: 66
+      latency_s: 0.004016058679296001
+    - device_id: 80
+      routed_activation_tokens: 66
+      latency_s: 0.004016058679296001
+    - device_id: 81
+      routed_activation_tokens: 66
+      latency_s: 0.004016058679296001
+    - device_id: 82
+      routed_activation_tokens: 66
+      latency_s: 0.004016058679296001
+    - device_id: 83
+      routed_activation_tokens: 66
+      latency_s: 0.004016058679296001
+    - device_id: 84
+      routed_activation_tokens: 66
+      latency_s: 0.004016058679296001
+    - device_id: 85
+      routed_activation_tokens: 66
+      latency_s: 0.004016058679296001
+    - device_id: 86
+      routed_activation_tokens: 66
+      latency_s: 0.004016058679296001
+    - device_id: 87
+      routed_activation_tokens: 66
+      latency_s: 0.004016058679296001
+    - device_id: 88
+      routed_activation_tokens: 66
+      latency_s: 0.004016058679296001
+    - device_id: 89
+      routed_activation_tokens: 66
+      latency_s: 0.004016058679296001
+    - device_id: 90
+      routed_activation_tokens: 66
+      latency_s: 0.004016058679296001
+    - device_id: 91
+      routed_activation_tokens: 66
+      latency_s: 0.004016058679296001
+    - device_id: 92
+      routed_activation_tokens: 66
+      latency_s: 0.004016058679296001
+    - device_id: 93
+      routed_activation_tokens: 66
+      latency_s: 0.004016058679296001
+    - device_id: 94
+      routed_activation_tokens: 66
+      latency_s: 0.004016058679296001
+    - device_id: 95
+      routed_activation_tokens: 66
+      latency_s: 0.004016058679296001
+    - device_id: 96
+      routed_activation_tokens: 66
+      latency_s: 0.004016058679296001
+    - device_id: 97
+      routed_activation_tokens: 66
+      latency_s: 0.004016058679296001
+    - device_id: 98
+      routed_activation_tokens: 66
+      latency_s: 0.004016058679296001
+    - device_id: 99
+      routed_activation_tokens: 66
+      latency_s: 0.004016058679296001
+    - device_id: 100
+      routed_activation_tokens: 66
+      latency_s: 0.004016058679296001
+    - device_id: 101
+      routed_activation_tokens: 66
+      latency_s: 0.004016058679296001
+    - device_id: 102
+      routed_activation_tokens: 66
+      latency_s: 0.004016058679296001
+    - device_id: 103
+      routed_activation_tokens: 66
+      latency_s: 0.004016058679296001
+    - device_id: 104
+      routed_activation_tokens: 66
+      latency_s: 0.004016058679296001
+    - device_id: 105
+      routed_activation_tokens: 66
+      latency_s: 0.004016058679296001
+    - device_id: 106
+      routed_activation_tokens: 66
+      latency_s: 0.004016058679296001
+    - device_id: 107
+      routed_activation_tokens: 64
+      latency_s: 0.004014469545984001
+    - device_id: 108
+      routed_activation_tokens: 60
+      latency_s: 0.004011291279360001
+    - device_id: 109
+      routed_activation_tokens: 60
+      latency_s: 0.004011291279360001
+    - device_id: 110
+      routed_activation_tokens: 60
+      latency_s: 0.004011291279360001
+    - device_id: 111
+      routed_activation_tokens: 60
+      latency_s: 0.004011291279360001
+    - device_id: 112
+      routed_activation_tokens: 60
+      latency_s: 0.004011291279360001
+    - device_id: 113
+      routed_activation_tokens: 60
+      latency_s: 0.004011291279360001
+    - device_id: 114
+      routed_activation_tokens: 60
+      latency_s: 0.004011291279360001
+    - device_id: 115
+      routed_activation_tokens: 60
+      latency_s: 0.004011291279360001
+    - device_id: 116
+      routed_activation_tokens: 60
+      latency_s: 0.004011291279360001
+    - device_id: 117
+      routed_activation_tokens: 60
+      latency_s: 0.004011291279360001
+    - device_id: 118
+      routed_activation_tokens: 60
+      latency_s: 0.004011291279360001
+    - device_id: 119
+      routed_activation_tokens: 60
+      latency_s: 0.004011291279360001
+    - device_id: 120
+      routed_activation_tokens: 60
+      latency_s: 0.004011291279360001
+    - device_id: 121
+      routed_activation_tokens: 60
+      latency_s: 0.004011291279360001
+    - device_id: 122
+      routed_activation_tokens: 60
+      latency_s: 0.004011291279360001
+    - device_id: 123
+      routed_activation_tokens: 60
+      latency_s: 0.004011291279360001
+    - device_id: 124
+      routed_activation_tokens: 60
+      latency_s: 0.004011291279360001
+    - device_id: 125
+      routed_activation_tokens: 60
+      latency_s: 0.004011291279360001
+    - device_id: 126
+      routed_activation_tokens: 60
+      latency_s: 0.004011291279360001
+    - device_id: 127
+      routed_activation_tokens: 60
+      latency_s: 0.004011291279360001
+    - device_id: 128
+      routed_activation_tokens: 60
+      latency_s: 0.004011291279360001
+  - original_decode_tokens: 1024
+    total_routed_activations: 8192
+    barrier_latency_s: 0.004068500078592
+    original_tokens_per_second: 251689.8071080729
+    devices:
+    - device_id: 65
+      routed_activation_tokens: 132
+      latency_s: 0.004068500078592
+    - device_id: 66
+      routed_activation_tokens: 132
+      latency_s: 0.004068500078592
+    - device_id: 67
+      routed_activation_tokens: 132
+      latency_s: 0.004068500078592
+    - device_id: 68
+      routed_activation_tokens: 132
+      latency_s: 0.004068500078592
+    - device_id: 69
+      routed_activation_tokens: 132
+      latency_s: 0.004068500078592
+    - device_id: 70
+      routed_activation_tokens: 132
+      latency_s: 0.004068500078592
+    - device_id: 71
+      routed_activation_tokens: 132
+      latency_s: 0.004068500078592
+    - device_id: 72
+      routed_activation_tokens: 132
+      latency_s: 0.004068500078592
+    - device_id: 73
+      routed_activation_tokens: 132
+      latency_s: 0.004068500078592
+    - device_id: 74
+      routed_activation_tokens: 132
+      latency_s: 0.004068500078592
+    - device_id: 75
+      routed_activation_tokens: 132
+      latency_s: 0.004068500078592
+    - device_id: 76
+      routed_activation_tokens: 132
+      latency_s: 0.004068500078592
+    - device_id: 77
+      routed_activation_tokens: 132
+      latency_s: 0.004068500078592
+    - device_id: 78
+      routed_activation_tokens: 132
+      latency_s: 0.004068500078592
+    - device_id: 79
+      routed_activation_tokens: 132
+      latency_s: 0.004068500078592
+    - device_id: 80
+      routed_activation_tokens: 132
+      latency_s: 0.004068500078592
+    - device_id: 81
+      routed_activation_tokens: 132
+      latency_s: 0.004068500078592
+    - device_id: 82
+      routed_activation_tokens: 132
+      latency_s: 0.004068500078592
+    - device_id: 83
+      routed_activation_tokens: 132
+      latency_s: 0.004068500078592
+    - device_id: 84
+      routed_activation_tokens: 132
+      latency_s: 0.004068500078592
+    - device_id: 85
+      routed_activation_tokens: 132
+      latency_s: 0.004068500078592
+    - device_id: 86
+      routed_activation_tokens: 128
+      latency_s: 0.004065321811968001
+    - device_id: 87
+      routed_activation_tokens: 126
+      latency_s: 0.004063732678656001
+    - device_id: 88
+      routed_activation_tokens: 126
+      latency_s: 0.004063732678656001
+    - device_id: 89
+      routed_activation_tokens: 126
+      latency_s: 0.004063732678656001
+    - device_id: 90
+      routed_activation_tokens: 126
+      latency_s: 0.004063732678656001
+    - device_id: 91
+      routed_activation_tokens: 126
+      latency_s: 0.004063732678656001
+    - device_id: 92
+      routed_activation_tokens: 126
+      latency_s: 0.004063732678656001
+    - device_id: 93
+      routed_activation_tokens: 126
+      latency_s: 0.004063732678656001
+    - device_id: 94
+      routed_activation_tokens: 126
+      latency_s: 0.004063732678656001
+    - device_id: 95
+      routed_activation_tokens: 126
+      latency_s: 0.004063732678656001
+    - device_id: 96
+      routed_activation_tokens: 126
+      latency_s: 0.004063732678656001
+    - device_id: 97
+      routed_activation_tokens: 126
+      latency_s: 0.004063732678656001
+    - device_id: 98
+      routed_activation_tokens: 126
+      latency_s: 0.004063732678656001
+    - device_id: 99
+      routed_activation_tokens: 126
+      latency_s: 0.004063732678656001
+    - device_id: 100
+      routed_activation_tokens: 126
+      latency_s: 0.004063732678656001
+    - device_id: 101
+      routed_activation_tokens: 126
+      latency_s: 0.004063732678656001
+    - device_id: 102
+      routed_activation_tokens: 126
+      latency_s: 0.004063732678656001
+    - device_id: 103
+      routed_activation_tokens: 126
+      latency_s: 0.004063732678656001
+    - device_id: 104
+      routed_activation_tokens: 126
+      latency_s: 0.004063732678656001
+    - device_id: 105
+      routed_activation_tokens: 126
+      latency_s: 0.004063732678656001
+    - device_id: 106
+      routed_activation_tokens: 126
+      latency_s: 0.004063732678656001
+    - device_id: 107
+      routed_activation_tokens: 126
+      latency_s: 0.004063732678656001
+    - device_id: 108
+      routed_activation_tokens: 126
+      latency_s: 0.004063732678656001
+    - device_id: 109
+      routed_activation_tokens: 126
+      latency_s: 0.004063732678656001
+    - device_id: 110
+      routed_activation_tokens: 126
+      latency_s: 0.004063732678656001
+    - device_id: 111
+      routed_activation_tokens: 126
+      latency_s: 0.004063732678656001
+    - device_id: 112
+      routed_activation_tokens: 126
+      latency_s: 0.004063732678656001
+    - device_id: 113
+      routed_activation_tokens: 126
+      latency_s: 0.004063732678656001
+    - device_id: 114
+      routed_activation_tokens: 126
+      latency_s: 0.004063732678656001
+    - device_id: 115
+      routed_activation_tokens: 126
+      latency_s: 0.004063732678656001
+    - device_id: 116
+      routed_activation_tokens: 126
+      latency_s: 0.004063732678656001
+    - device_id: 117
+      routed_activation_tokens: 126
+      latency_s: 0.004063732678656001
+    - device_id: 118
+      routed_activation_tokens: 126
+      latency_s: 0.004063732678656001
+    - device_id: 119
+      routed_activation_tokens: 126
+      latency_s: 0.004063732678656001
+    - device_id: 120
+      routed_activation_tokens: 126
+      latency_s: 0.004063732678656001
+    - device_id: 121
+      routed_activation_tokens: 126
+      latency_s: 0.004063732678656001
+    - device_id: 122
+      routed_activation_tokens: 126
+      latency_s: 0.004063732678656001
+    - device_id: 123
+      routed_activation_tokens: 126
+      latency_s: 0.004063732678656001
+    - device_id: 124
+      routed_activation_tokens: 126
+      latency_s: 0.004063732678656001
+    - device_id: 125
+      routed_activation_tokens: 126
+      latency_s: 0.004063732678656001
+    - device_id: 126
+      routed_activation_tokens: 126
+      latency_s: 0.004063732678656001
+    - device_id: 127
+      routed_activation_tokens: 126
+      latency_s: 0.004063732678656001
+    - device_id: 128
+      routed_activation_tokens: 126
+      latency_s: 0.004063732678656001
+assumptions:
+- Prefill uses compute latency and is calibrated at the supplied P and existing C.
+- Supplied FLOP/s and byte/s rates are effective; no hidden efficiency is applied.
+- Routing is perfectly balanced; routed activations already include top-k.
+- Dense/shared FFN work is ideally EP-sharded; dispatch/combine stays separate.
+- Compressed MLA and reference-context amortization of recurrent state are used.
+- This is a coarse lower-bound calibration, not a kernel/capacity simulator.

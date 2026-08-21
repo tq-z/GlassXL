@@ -97,16 +97,20 @@ records the frozen behavior and verified example results.
 
 ## Generate roofline-calibrated configs
 
-The lightweight offline estimator converts effective device FLOP/s, memory
-bandwidth, and fabric byte rates into simulator-native token rates. It writes
-`hardware.yaml`, `mapping.yaml`, and a grouped per-layer/all-layer
-`roofline_report.yaml`:
+The lightweight offline estimator converts phase-specific effective per-device
+FLOP/s, memory bandwidth, and fabric byte rates into simulator-native token
+rates. It writes `hardware.yaml`, `mapping.yaml`, and a grouped
+per-layer/all-layer `roofline_report.yaml`:
 
 ```bash
 .venv/bin/python scripts/generate_config.py \
   --model Kimi-K2 \
-  --device-flops-per-second 1e15 \
-  --device-memory-bandwidth-bytes-per-second 3e12 \
+  --prefill-device-flops-per-second 1e15 \
+  --prefill-device-memory-bandwidth-bytes-per-second 3e12 \
+  --decode-attn-device-flops-per-second 6e14 \
+  --decode-attn-device-memory-bandwidth-bytes-per-second 3.2e12 \
+  --decode-ffn-device-flops-per-second 8e14 \
+  --decode-ffn-device-memory-bandwidth-bytes-per-second 2.8e12 \
   --dp 2 --ep 4 \
   --prefill-tokens 4096 --decode-context-tokens 32768 \
   --attn-kv-capacity-bytes 8e10 \
@@ -120,8 +124,11 @@ bandwidth, and fabric byte rates into simulator-native token rates. It writes
   --output-dir generated/kimi-k2
 ```
 
-Inputs use decimal SI units and are treated as effective rates. Existing output
-files are protected unless `--force` is passed. See
+Inputs use decimal SI units and are treated as effective rates. The older
+shared `--device-flops-per-second` and
+`--device-memory-bandwidth-bytes-per-second` flags remain available as
+fallbacks for any omitted phase-specific values. Existing output files are
+protected unless `--force` is passed. See
 [roofline_model.md](docs/roofline_model.md) for equations, supported model
 sources, token conversions, and intentional omissions.
 

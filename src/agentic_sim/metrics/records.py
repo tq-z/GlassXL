@@ -133,8 +133,12 @@ class FFNDeviceMetric:
 class DecodeStepMetric:
     decode_step: int
     ready_time_s: float
+    session_ids: tuple[int, ...]
     finish_time_s: float
     active_sessions: int
+    attention_time_s: float
+    ffn_time_s: float
+    ffn_all_to_all_time_s: float
     attention_barrier_s: float
     attention_device_wait_s: tuple[tuple[int, float], ...]
     routed_activation_tokens: int

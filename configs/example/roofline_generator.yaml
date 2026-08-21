@@ -8,9 +8,15 @@
 # GLM-4.5, DeepSeek-V3, Kimi-K2, and QWEN3-235B.
 model: Kimi-K2
 
-# Effective usable per-device rates.  Units are decimal SI: FLOP/s and bytes/s.
-device_flops_per_second: 1.0e15
-device_memory_bandwidth_bytes_per_second: 3.0e12
+# Effective usable per-device rates. Units are decimal SI: FLOP/s and bytes/s.
+# They are separate because prefill, attention, and expert GEMMs can reach
+# different effective utilization on the same nominal hardware.
+prefill_device_flops_per_second: 1.0e15
+prefill_device_memory_bandwidth_bytes_per_second: 3.0e12
+decode_attn_device_flops_per_second: 6.0e14
+decode_attn_device_memory_bandwidth_bytes_per_second: 3.2e12
+decode_ffn_device_flops_per_second: 8.0e14
+decode_ffn_device_memory_bandwidth_bytes_per_second: 2.8e12
 
 # Deployment and calibration operating points.
 dp: 2                         # Decode-attention replicas.
