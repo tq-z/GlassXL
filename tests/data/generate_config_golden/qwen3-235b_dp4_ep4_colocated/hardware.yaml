@@ -1,0 +1,362 @@
+schema_version: 1
+devices:
+- id: 0
+  capabilities:
+    prefill:
+      model: aggregate_throughput
+      tokens_per_second: 107358.37681444934
+- id: 1
+  capabilities:
+    decode_attn:
+      model: linear_context
+      context_tokens_per_second: 13295794.872476708
+      kv_capacity_tokens: 415558
+    decode_ffn:
+      model: batch_latency_curve
+      points:
+      - activation_tokens: 0
+        latency_us: 0.0
+      - activation_tokens: 1
+        latency_us: 443.94470400000006
+      - activation_tokens: 2
+        latency_us: 887.8894080000001
+      - activation_tokens: 3
+        latency_us: 1331.834112
+      - activation_tokens: 4
+        latency_us: 1775.7788160000002
+      - activation_tokens: 5
+        latency_us: 2219.72352
+      - activation_tokens: 6
+        latency_us: 2663.668224
+      - activation_tokens: 7
+        latency_us: 3107.612928
+      - activation_tokens: 8
+        latency_us: 3551.5576320000005
+      - activation_tokens: 9
+        latency_us: 3995.502335999999
+      - activation_tokens: 10
+        latency_us: 4439.44704
+      - activation_tokens: 11
+        latency_us: 4883.391744
+      - activation_tokens: 12
+        latency_us: 5327.336448
+      - activation_tokens: 13
+        latency_us: 5771.281152
+      - activation_tokens: 14
+        latency_us: 6215.225856
+      - activation_tokens: 15
+        latency_us: 6659.1705600000005
+      - activation_tokens: 16
+        latency_us: 7103.115264000001
+      - activation_tokens: 17
+        latency_us: 7547.059968
+      - activation_tokens: 18
+        latency_us: 7991.004671999998
+      - activation_tokens: 19
+        latency_us: 8434.949376
+      - activation_tokens: 20
+        latency_us: 8878.89408
+      - activation_tokens: 21
+        latency_us: 9322.838783999998
+      - activation_tokens: 22
+        latency_us: 9766.783488
+      - activation_tokens: 23
+        latency_us: 10210.728192
+      - activation_tokens: 24
+        latency_us: 10654.672896
+      - activation_tokens: 25
+        latency_us: 11098.617600000001
+      - activation_tokens: 26
+        latency_us: 11542.562304
+      - activation_tokens: 27
+        latency_us: 11986.507008
+      - activation_tokens: 28
+        latency_us: 12430.451712
+      - activation_tokens: 29
+        latency_us: 12874.396416000001
+      - activation_tokens: 30
+        latency_us: 13318.341120000001
+      - activation_tokens: 31
+        latency_us: 13762.285823999999
+      - activation_tokens: 32
+        latency_us: 14206.230528000002
+      - activation_tokens: 10306
+        latency_us: 18285.583872000003
+      - activation_tokens: 10307
+        latency_us: 18286.582431744002
+      - activation_tokens: 10308
+        latency_us: 18288.356622336
+      - activation_tokens: 20616
+        latency_us: 36576.713244672
+      - activation_tokens: 41232
+        latency_us: 73153.426489344
+- id: 2
+  capabilities:
+    decode_attn:
+      model: linear_context
+      context_tokens_per_second: 13295794.872476708
+      kv_capacity_tokens: 415558
+    decode_ffn:
+      model: batch_latency_curve
+      points:
+      - activation_tokens: 0
+        latency_us: 0.0
+      - activation_tokens: 1
+        latency_us: 443.94470400000006
+      - activation_tokens: 2
+        latency_us: 887.8894080000001
+      - activation_tokens: 3
+        latency_us: 1331.834112
+      - activation_tokens: 4
+        latency_us: 1775.7788160000002
+      - activation_tokens: 5
+        latency_us: 2219.72352
+      - activation_tokens: 6
+        latency_us: 2663.668224
+      - activation_tokens: 7
+        latency_us: 3107.612928
+      - activation_tokens: 8
+        latency_us: 3551.5576320000005
+      - activation_tokens: 9
+        latency_us: 3995.502335999999
+      - activation_tokens: 10
+        latency_us: 4439.44704
+      - activation_tokens: 11
+        latency_us: 4883.391744
+      - activation_tokens: 12
+        latency_us: 5327.336448
+      - activation_tokens: 13
+        latency_us: 5771.281152
+      - activation_tokens: 14
+        latency_us: 6215.225856
+      - activation_tokens: 15
+        latency_us: 6659.1705600000005
+      - activation_tokens: 16
+        latency_us: 7103.115264000001
+      - activation_tokens: 17
+        latency_us: 7547.059968
+      - activation_tokens: 18
+        latency_us: 7991.004671999998
+      - activation_tokens: 19
+        latency_us: 8434.949376
+      - activation_tokens: 20
+        latency_us: 8878.89408
+      - activation_tokens: 21
+        latency_us: 9322.838783999998
+      - activation_tokens: 22
+        latency_us: 9766.783488
+      - activation_tokens: 23
+        latency_us: 10210.728192
+      - activation_tokens: 24
+        latency_us: 10654.672896
+      - activation_tokens: 25
+        latency_us: 11098.617600000001
+      - activation_tokens: 26
+        latency_us: 11542.562304
+      - activation_tokens: 27
+        latency_us: 11986.507008
+      - activation_tokens: 28
+        latency_us: 12430.451712
+      - activation_tokens: 29
+        latency_us: 12874.396416000001
+      - activation_tokens: 30
+        latency_us: 13318.341120000001
+      - activation_tokens: 31
+        latency_us: 13762.285823999999
+      - activation_tokens: 32
+        latency_us: 14206.230528000002
+      - activation_tokens: 10306
+        latency_us: 18285.583872000003
+      - activation_tokens: 10307
+        latency_us: 18286.582431744002
+      - activation_tokens: 10308
+        latency_us: 18288.356622336
+      - activation_tokens: 20616
+        latency_us: 36576.713244672
+      - activation_tokens: 41232
+        latency_us: 73153.426489344
+- id: 3
+  capabilities:
+    decode_attn:
+      model: linear_context
+      context_tokens_per_second: 13295794.872476708
+      kv_capacity_tokens: 415558
+    decode_ffn:
+      model: batch_latency_curve
+      points:
+      - activation_tokens: 0
+        latency_us: 0.0
+      - activation_tokens: 1
+        latency_us: 443.94470400000006
+      - activation_tokens: 2
+        latency_us: 887.8894080000001
+      - activation_tokens: 3
+        latency_us: 1331.834112
+      - activation_tokens: 4
+        latency_us: 1775.7788160000002
+      - activation_tokens: 5
+        latency_us: 2219.72352
+      - activation_tokens: 6
+        latency_us: 2663.668224
+      - activation_tokens: 7
+        latency_us: 3107.612928
+      - activation_tokens: 8
+        latency_us: 3551.5576320000005
+      - activation_tokens: 9
+        latency_us: 3995.502335999999
+      - activation_tokens: 10
+        latency_us: 4439.44704
+      - activation_tokens: 11
+        latency_us: 4883.391744
+      - activation_tokens: 12
+        latency_us: 5327.336448
+      - activation_tokens: 13
+        latency_us: 5771.281152
+      - activation_tokens: 14
+        latency_us: 6215.225856
+      - activation_tokens: 15
+        latency_us: 6659.1705600000005
+      - activation_tokens: 16
+        latency_us: 7103.115264000001
+      - activation_tokens: 17
+        latency_us: 7547.059968
+      - activation_tokens: 18
+        latency_us: 7991.004671999998
+      - activation_tokens: 19
+        latency_us: 8434.949376
+      - activation_tokens: 20
+        latency_us: 8878.89408
+      - activation_tokens: 21
+        latency_us: 9322.838783999998
+      - activation_tokens: 22
+        latency_us: 9766.783488
+      - activation_tokens: 23
+        latency_us: 10210.728192
+      - activation_tokens: 24
+        latency_us: 10654.672896
+      - activation_tokens: 25
+        latency_us: 11098.617600000001
+      - activation_tokens: 26
+        latency_us: 11542.562304
+      - activation_tokens: 27
+        latency_us: 11986.507008
+      - activation_tokens: 28
+        latency_us: 12430.451712
+      - activation_tokens: 29
+        latency_us: 12874.396416000001
+      - activation_tokens: 30
+        latency_us: 13318.341120000001
+      - activation_tokens: 31
+        latency_us: 13762.285823999999
+      - activation_tokens: 32
+        latency_us: 14206.230528000002
+      - activation_tokens: 10306
+        latency_us: 18285.583872000003
+      - activation_tokens: 10307
+        latency_us: 18286.582431744002
+      - activation_tokens: 10308
+        latency_us: 18288.356622336
+      - activation_tokens: 20616
+        latency_us: 36576.713244672
+      - activation_tokens: 41232
+        latency_us: 73153.426489344
+- id: 4
+  capabilities:
+    decode_attn:
+      model: linear_context
+      context_tokens_per_second: 13295794.872476708
+      kv_capacity_tokens: 415558
+    decode_ffn:
+      model: batch_latency_curve
+      points:
+      - activation_tokens: 0
+        latency_us: 0.0
+      - activation_tokens: 1
+        latency_us: 443.94470400000006
+      - activation_tokens: 2
+        latency_us: 887.8894080000001
+      - activation_tokens: 3
+        latency_us: 1331.834112
+      - activation_tokens: 4
+        latency_us: 1775.7788160000002
+      - activation_tokens: 5
+        latency_us: 2219.72352
+      - activation_tokens: 6
+        latency_us: 2663.668224
+      - activation_tokens: 7
+        latency_us: 3107.612928
+      - activation_tokens: 8
+        latency_us: 3551.5576320000005
+      - activation_tokens: 9
+        latency_us: 3995.502335999999
+      - activation_tokens: 10
+        latency_us: 4439.44704
+      - activation_tokens: 11
+        latency_us: 4883.391744
+      - activation_tokens: 12
+        latency_us: 5327.336448
+      - activation_tokens: 13
+        latency_us: 5771.281152
+      - activation_tokens: 14
+        latency_us: 6215.225856
+      - activation_tokens: 15
+        latency_us: 6659.1705600000005
+      - activation_tokens: 16
+        latency_us: 7103.115264000001
+      - activation_tokens: 17
+        latency_us: 7547.059968
+      - activation_tokens: 18
+        latency_us: 7991.004671999998
+      - activation_tokens: 19
+        latency_us: 8434.949376
+      - activation_tokens: 20
+        latency_us: 8878.89408
+      - activation_tokens: 21
+        latency_us: 9322.838783999998
+      - activation_tokens: 22
+        latency_us: 9766.783488
+      - activation_tokens: 23
+        latency_us: 10210.728192
+      - activation_tokens: 24
+        latency_us: 10654.672896
+      - activation_tokens: 25
+        latency_us: 11098.617600000001
+      - activation_tokens: 26
+        latency_us: 11542.562304
+      - activation_tokens: 27
+        latency_us: 11986.507008
+      - activation_tokens: 28
+        latency_us: 12430.451712
+      - activation_tokens: 29
+        latency_us: 12874.396416000001
+      - activation_tokens: 30
+        latency_us: 13318.341120000001
+      - activation_tokens: 31
+        latency_us: 13762.285823999999
+      - activation_tokens: 32
+        latency_us: 14206.230528000002
+      - activation_tokens: 10306
+        latency_us: 18285.583872000003
+      - activation_tokens: 10307
+        latency_us: 18286.582431744002
+      - activation_tokens: 10308
+        latency_us: 18288.356622336
+      - activation_tokens: 20616
+        latency_us: 36576.713244672
+      - activation_tokens: 41232
+        latency_us: 73153.426489344
+kv_pool:
+  capacity_tokens: null
+  load_tokens_per_second: 519448.1382978723
+  offload_tokens_per_second: 519448.1382978723
+  start_latency_us: 10.0
+interconnects:
+  ffn_all_to_all:
+    model: startup_min_package
+    start_latency_us: 470.0
+    min_package_tokens: 2
+    throughput_tokens_per_second: 519448.1382978723
+  kv_p2p:
+    model: startup_throughput
+    start_latency_us: 5.0
+    throughput_tokens_per_second: 1038896.2765957447

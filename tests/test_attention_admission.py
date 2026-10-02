@@ -374,10 +374,32 @@ def test_invalid_admission_times_do_not_advance_cursor_or_drop_waiters() -> None
     blocked = one_turn_session(1, 20)
     prepare_turn(blocked, 2.0)
     assert admission.submit(blocked, 2.0) is None
-    with pytest.raises(ValueError, match="cannot precede.*enqueue"):
-        admission.retry(1.5)
+    assert admission.retry(1.5) == ()
     assert [waiter.session.session_id for waiter in admission.waiters] == [1]
     assert blocked.status is SessionStatus.WAITING_ATTN_CAPACITY
+
+
+def test_capacity_freed_before_a_future_ready_waiter_admits_it_when_ready() -> None:
+    admission = controller({1: 10})
+    resident = one_turn_session(0, 8)
+    prepare_turn(resident, 0.0)
+    assert admission.submit(resident, 0.0) is not None
+
+    # Prefill results are reserved ahead of the event clock, so a waiter can be
+    # enqueued with a ready time after the capacity release that is processed next.
+    waiter = one_turn_session(1, 5)
+    prepare_turn(waiter, 2.0)
+    assert admission.submit(waiter, 2.0) is None
+
+    resident.finish_decode()
+    completion = admission.complete_pool_write(resident, 1.0)
+
+    assert len(completion.admissions) == 1
+    admitted = completion.admissions[0]
+    assert admitted.session_id == 1
+    assert admitted.admission_time_s == 2.0
+    assert admitted.capacity_wait_s == 0.0
+    assert admission.waiters == ()
 
 
 def test_capacity_wait_queue_is_strictly_fcfs() -> None:
@@ -397,6 +419,46 @@ def test_capacity_wait_queue_is_strictly_fcfs() -> None:
         (0, 0),
         (1, 1),
     ]
+
+
+def test_drained_panel_releases_protected_copies_instead_of_deadlocking() -> None:
+    admission = controller({1: 20}, residency=AttentionResidency.LRU_CACHE)
+    cached = [
+        session_with_turns(index, 4, (TurnSpec(0, 0, 1, 0.0), TurnSpec(1, 0, 1, 0.0)))
+        for index in (0, 1)
+    ]
+    for session in cached:
+        prepare_turn(session)
+        assert admission.submit(session, 0.0) is not None
+        finish_and_clean(admission, session, first_token_time_s=0.1, pool_completion_time_s=0.2)
+    active = one_turn_session(2, 8, output_tokens=1)
+    prepare_turn(active, 0.3)
+    assert admission.submit(active, 0.3) is not None
+
+    # The head needs more than the active session's release, and the cached copies
+    # of the waiters queued behind it are protected.
+    head = one_turn_session(3, 12)
+    prepare_turn(head, 0.4)
+    assert admission.submit(head, 0.4) is None
+    for session in cached:
+        prepare_turn(session, 0.5)
+        assert admission.submit(session, 0.5) is None
+
+    active.emit_decode_token(0.9)
+    active.finish_decode()
+    completion = admission.complete_pool_write(active, 1.0)
+
+    # Nothing is active or draining any more, so without a release no retry would
+    # ever run again. The head is admitted in FCFS order by evicting clean copies.
+    # LRU order releases both protected copies and the drained session; the next
+    # waiter then fits as an ordinary full restore.
+    assert [item.session_id for item in completion.admissions] == [3, 0]
+    assert completion.admissions[0].evicted_session_ids == (0, 1, 2)
+    assert not completion.admissions[1].cache_hit
+    assert admission.deadlock_releases == 1
+    assert cached[1].kv.attention.state is AttentionKVResidency.EVICTED
+    assert [waiter.session.session_id for waiter in admission.waiters] == [1]
+    admission.validate_capacities()
 
 
 def test_controller_builds_from_typed_mapping_and_hardware_devices() -> None:

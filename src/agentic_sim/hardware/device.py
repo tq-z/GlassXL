@@ -7,7 +7,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 from enum import StrEnum
 
-from agentic_sim.config.models import DeviceConfig, ExpertModel
+from agentic_sim.config.models import DeviceConfig, ExpertModel, PrefillCapabilityConfig, PrefillModel
 from agentic_sim.core.resource import FCFSResource, Reservation
 from agentic_sim.hardware.compute_models import (
     AggregatePrefillLatencyModel,
@@ -20,8 +20,32 @@ from agentic_sim.hardware.compute_models import (
     LinearExpertBatchLatencyModel,
     PrefillLatencyModel,
     PrefillWork,
+    RooflineContextPrefillLatencyModel,
     StageContext,
 )
+
+
+def _prefill_model(capability: PrefillCapabilityConfig) -> PrefillLatencyModel:
+    if capability.model is PrefillModel.AGGREGATE_THROUGHPUT:
+        if capability.tokens_per_second is None:
+            raise ValueError("aggregate prefill capability is missing tokens_per_second")
+        return AggregatePrefillLatencyModel(capability.tokens_per_second)
+    if capability.model is PrefillModel.ROOFLINE_CONTEXT:
+        if capability.roofline is None:
+            raise ValueError("roofline prefill capability is missing its coefficients")
+        roofline = capability.roofline
+        return RooflineContextPrefillLatencyModel(
+            flops_per_second=roofline.flops_per_second,
+            memory_bandwidth_bytes_per_second=roofline.memory_bandwidth_bytes_per_second,
+            flops_per_token=roofline.flops_per_token,
+            flops_per_attention_pair=roofline.flops_per_attention_pair,
+            fixed_weight_bytes=roofline.fixed_weight_bytes,
+            routed_weight_bytes=roofline.routed_weight_bytes,
+            routed_expert_fraction=roofline.routed_expert_fraction,
+            context_bytes_per_token=roofline.context_bytes_per_token,
+            bytes_per_prefill_token=roofline.bytes_per_prefill_token,
+        )
+    raise ValueError(f"unsupported prefill model: {capability.model}")
 
 
 class DeviceOperation(StrEnum):
@@ -117,7 +141,7 @@ class Device:
         return cls(
             device_id=config.id,
             prefill_model=(
-                AggregatePrefillLatencyModel(capabilities.prefill.tokens_per_second)
+                _prefill_model(capabilities.prefill)
                 if capabilities.prefill is not None
                 else None
             ),

@@ -1,0 +1,24 @@
+# GLM-4.5 variant: energy coefficients for H200 prefill chips and NMP decode nodes built from
+# perf_sim's default DRAM3D/PNM configuration, with photonic-chip static power
+# from Wang et al., "Silicon Photonics Chip I/O for Ultra High-Bandwidth and
+# Energy-Efficient Die-to-Die Connectivity", IEEE CICC 2024 (Table 1).
+#
+# Presets and provenance: power_model/coefficients.py (perf_sim_default_nmp, h200).
+# Values neither perf_sim nor Wang et al. report (leakage, DRAM background,
+# optical-I/O driver power, GPU idle/HBM background) remain flagged placeholders.
+schema_version: 1
+model: glm-4.5
+device_kinds: {}
+gpu:
+  preset: h200
+  overrides: {}
+nmp:
+  preset: perf_sim_default_nmp
+  overrides: {}
+kv_pool:
+  preset: off_panel
+  overrides: {}
+trace:
+  dt_s: 0.01
+  warmup_s: 0.0
+allow_placeholders: true

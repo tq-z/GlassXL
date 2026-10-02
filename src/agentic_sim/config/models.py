@@ -14,6 +14,7 @@ class ConfigurationError(ValueError):
 
 class PrefillModel(StrEnum):
     AGGREGATE_THROUGHPUT = "aggregate_throughput"
+    ROOFLINE_CONTEXT = "roofline_context"
 
 
 class AttentionModel(StrEnum):
@@ -63,9 +64,23 @@ class AttentionResidency(StrEnum):
 
 
 @dataclass(frozen=True)
+class RooflinePrefillConfig:
+    flops_per_second: float
+    memory_bandwidth_bytes_per_second: float
+    flops_per_token: float
+    flops_per_attention_pair: float
+    fixed_weight_bytes: float
+    routed_weight_bytes: float
+    routed_expert_fraction: float
+    context_bytes_per_token: float
+    bytes_per_prefill_token: float
+
+
+@dataclass(frozen=True)
 class PrefillCapabilityConfig:
     model: PrefillModel
-    tokens_per_second: float
+    tokens_per_second: float | None = None
+    roofline: RooflinePrefillConfig | None = None
 
 
 @dataclass(frozen=True)

@@ -62,8 +62,13 @@ not overlap.
 | YAML path | Type | Req. | Default | Unit | Allowed / validation | Equation or runtime effect and relationships |
 |---|---|---:|---|---|---|---|
 | `devices[].capabilities.prefill` | mapping | conditional | — | — | required to map the device for prefill | Selects the prefill service model. |
-| `...prefill.model` | string | yes | — | — | `aggregate_throughput` | V1 uses the aggregate model interface. |
-| `...prefill.tokens_per_second` | number | yes | — | tokens/s | finite and > 0 | For batch B, `T = sum(P_i) / rate`. Context and batch metadata remain model inputs. |
+| `...prefill.model` | string | yes | — | — | `aggregate_throughput`, `roofline_context` | Selects the fields below. |
+| `...prefill.tokens_per_second` | number | `aggregate_throughput` only | — | tokens/s | finite and > 0 | For batch B, `T = sum(P_i) / rate`. Context and batch metadata remain model inputs. |
+| `...prefill.flops_per_second`, `...memory_bandwidth_bytes_per_second` | number | `roofline_context` only | — | FLOP/s, B/s | finite and > 0 | Effective rates of the prefill device (a TP group scales both). |
+| `...prefill.flops_per_token`, `...flops_per_attention_pair` | number | `roofline_context` only | — | FLOP | finite and >= 0 | `flops = a_tok*T + a_pair*sum(P_i*C_i + P_i(P_i+1)/2)` with `T = sum(P_i)` and `C_i` the session's existing context. |
+| `...prefill.fixed_weight_bytes`, `...routed_weight_bytes` | number | `roofline_context` only | — | bytes | finite and >= 0 | Weights read once per batch; routed experts scaled by expected coverage `1-(1-f)^T`. |
+| `...prefill.routed_expert_fraction` | number | `roofline_context` only | — | — | within [0, 1] | `f = top_k / num_experts`. |
+| `...prefill.context_bytes_per_token`, `...bytes_per_prefill_token` | number | `roofline_context` only | — | bytes/token | finite and >= 0 | `bytes = W_fix + W_rt*coverage + b_ctx*sum_{P_i>0} C_i + b_tok*T`; latency `= max(flops/F, bytes/BW)`. `scripts/generate_config.py --prefill-model roofline_context` emits these from `roofline_model`. |
 
 ### Decode-attention capability
 

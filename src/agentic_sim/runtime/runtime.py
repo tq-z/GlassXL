@@ -23,8 +23,20 @@ class AgenticRuntime:
         self,
         config: SimulationConfig,
         session_specs: Sequence[SessionSpec] | None = None,
+        *,
+        prefill_transfers_at_completion: bool = False,
     ) -> None:
+        """``prefill_transfers_at_completion`` books each prefill batch's attention
+        admissions and KV P2P transfers when its compute finishes, on the event
+        clock, and sends them from the prefill device's copy engine rather than its
+        compute queue. The default books them at launch with a future ready time and
+        on the source queue; either way the reservation can start in the future and
+        also occupies the destination decode device's FCFS queue, so decode steps
+        requested before the transfer starts wait behind it.
+        """
+
         self.config = config
+        self._prefill_transfers_at_completion = prefill_transfers_at_completion
         self.topology = Topology.from_config(config.hardware)
         self.attention = AttentionAdmissionController.from_config(
             config.mapping.decode_attn,
@@ -35,6 +47,7 @@ class AgenticRuntime:
             config.mapping.prefill,
             self.attention,
         )
+        self.prefill.reserve_transfer_source = not prefill_transfers_at_completion
         self.decode = DecodeController(
             self.topology,
             config.mapping,
@@ -74,6 +87,7 @@ class AgenticRuntime:
         self.engine.register_handler(EventType.TURN_READY, self._on_turn_ready)
         self.engine.register_handler(EventType.PREFILL_LAUNCH, self._on_prefill_launch)
         self.engine.register_handler(EventType.DECODE_LAUNCH, self._on_decode_launch)
+        self.engine.register_handler(EventType.PREFILL_COMPLETE, self._on_prefill_complete)
         self.engine.register_handler(
             EventType.POOL_WRITE_COMPLETE,
             self._on_pool_write_complete,
@@ -106,7 +120,24 @@ class AgenticRuntime:
         if self._prefill_launch_time_s != event.time:
             return
         self._prefill_launch_time_s = None
-        results = self.prefill.process_ready(event.time)
+        if self._prefill_transfers_at_completion:
+            for scheduled in self.prefill.launch_ready(event.time):
+                self.engine.schedule(
+                    scheduled.compute.finish_time,
+                    EventType.PREFILL_COMPLETE,
+                    scheduled,
+                )
+            self._request_prefill_launch(event.time)
+            return
+        self._record_prefill_results(self.prefill.process_ready(event.time))
+        self._request_prefill_launch(event.time)
+
+    def _on_prefill_complete(self, event: Event) -> None:
+        self._record_prefill_results((self.prefill.complete_batch(event.payload),))
+        # The transfer's source endpoint may have moved this device's availability.
+        self._request_prefill_launch(event.time)
+
+    def _record_prefill_results(self, results) -> None:
         for result in results:
             self.metrics.record_prefill(result, self.config.mapping.prefill.state.value)
             for transfer in result.transfers:
@@ -121,7 +152,6 @@ class AgenticRuntime:
                 default=max(result.compute.finish_time for result in results),
             )
             self.metrics.capture_attention(snapshot_time, self.attention)
-        self._request_prefill_launch(event.time)
 
     def _request_decode_launch(self, ready_time_s: float) -> None:
         target = max(ready_time_s, self._decode_available_time_s)

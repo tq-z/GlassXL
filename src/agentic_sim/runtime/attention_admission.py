@@ -259,6 +259,7 @@ class AttentionAdmissionController:
         )
         self._waiters: deque[CapacityWaiter] = deque()
         self._next_waiter_sequence = 0
+        self.deadlock_releases = 0
 
     @classmethod
     def from_config(
@@ -313,19 +314,27 @@ class AttentionAdmissionController:
         admissions: list[AttentionAdmission] = []
         while self._waiters:
             waiter = self._waiters[0]
-            if retry_time < waiter.enqueued_time_s:
-                raise ValueError(
-                    "capacity retry cannot precede the head waiter's enqueue time"
-                )
             plan = self._select_plan(waiter.session)
+            if plan is None and self._drained():
+                # Nothing is active or draining, so no pool write or eviction will
+                # ever call retry again: the head is blocked only by cached copies
+                # that later waiters protect. Release those clean, recoverable copies
+                # instead of deadlocking; FCFS order is unchanged.
+                plan = self._select_plan(waiter.session, honor_protection=False)
+                if plan is not None:
+                    self.deadlock_releases += 1
             if plan is None:
                 break
             self._waiters.popleft()
+            # Waiters can carry a future ready time (prefill work is reserved ahead
+            # of the event clock). Capacity freed earlier is still free then, and
+            # FCFS keeps later submissions behind this waiter, so admit it when it
+            # becomes ready.
             admissions.append(
                 self._commit(
                     plan,
                     waiter.session,
-                    retry_time,
+                    max(retry_time, waiter.enqueued_time_s),
                     waiter.transfer_pending,
                 )
             )
@@ -421,9 +430,19 @@ class AttentionAdmissionController:
         )
         self._next_waiter_sequence += 1
 
-    def _select_plan(self, session: SessionState) -> AttentionCapacityPlan | None:
+    def _drained(self) -> bool:
+        return not any(
+            resident.kv.attention.state
+            in (AttentionKVResidency.ACTIVE, AttentionKVResidency.DRAINING_DIRTY)
+            for device in self.devices.values()
+            for resident in device.resident_sessions.values()
+        )
+
+    def _select_plan(
+        self, session: SessionState, *, honor_protection: bool = True
+    ) -> AttentionCapacityPlan | None:
         attention = session.kv.attention
-        protected = self._protected_affinities()
+        protected = self._protected_affinities() if honor_protection else {}
         if attention.state is AttentionKVResidency.INACTIVE_CLEAN:
             device_id = attention.device_id
             if device_id is None or device_id not in self.devices:

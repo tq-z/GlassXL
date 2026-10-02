@@ -15,6 +15,7 @@ from agentic_sim.hardware.compute_models import (
     LinearExpertBatchLatencyModel,
     PrefillLatencyModel,
     PrefillWork,
+    RooflineContextPrefillLatencyModel,
     StageContext,
 )
 from agentic_sim.hardware.interconnect import (
@@ -35,6 +36,61 @@ def test_exact_prefill_sum_of_incremental_tokens() -> None:
     )
 
     assert model.latency_s(batch, CONTEXT) == pytest.approx(0.3)
+
+
+def roofline_prefill(**overrides) -> RooflineContextPrefillLatencyModel:
+    values = dict(
+        flops_per_second=100.0,
+        memory_bandwidth_bytes_per_second=1000.0,
+        flops_per_token=2.0,
+        flops_per_attention_pair=1.0,
+        fixed_weight_bytes=50.0,
+        routed_weight_bytes=400.0,
+        routed_expert_fraction=0.5,
+        context_bytes_per_token=3.0,
+        bytes_per_prefill_token=10.0,
+    )
+    values.update(overrides)
+    return RooflineContextPrefillLatencyModel(**values)
+
+
+def test_exact_roofline_prefill_compute_bound() -> None:
+    model = roofline_prefill()
+    batch = (
+        PrefillWork(0, context_tokens=100, prefill_tokens=3, unsynced_decode_tokens=0),
+        PrefillWork(1, context_tokens=40, prefill_tokens=1, unsynced_decode_tokens=5),
+    )
+    # T=4; pairs = 3*100 + 6 + 1*40 + 1 = 347; flops = 8 + 347 = 355 -> 3.55 s.
+    # bytes = 50 + 400*(1-0.5^4) + 3*140 + 10*4 = 885 -> 0.885 s.
+    assert model.latency_s(batch, CONTEXT) == pytest.approx(3.55)
+
+
+def test_exact_roofline_prefill_memory_bound_and_context_rules() -> None:
+    model = roofline_prefill(flops_per_second=1e9)
+    batch = (
+        PrefillWork(0, context_tokens=100, prefill_tokens=2, unsynced_decode_tokens=0),
+        PrefillWork(1, context_tokens=7000, prefill_tokens=0, unsynced_decode_tokens=0),
+    )
+    # A session with no new tokens contributes no context read.
+    expected_bytes = 50.0 + 400.0 * (1.0 - 0.5**2) + 3.0 * 100 + 10.0 * 2
+    assert model.latency_s(batch, CONTEXT) == pytest.approx(expected_bytes / 1000.0)
+    assert model.latency_s(batch[1:], CONTEXT) == 0.0
+    assert model.expert_coverage(0) == 0.0
+    assert roofline_prefill(routed_expert_fraction=1.0).expert_coverage(3) == 1.0
+
+
+@pytest.mark.parametrize(
+    ("overrides", "message"),
+    [
+        ({"flops_per_second": 0.0}, "flops_per_second"),
+        ({"memory_bandwidth_bytes_per_second": -1.0}, "memory_bandwidth"),
+        ({"fixed_weight_bytes": -1.0}, "fixed_weight_bytes"),
+        ({"routed_expert_fraction": 1.5}, "routed_expert_fraction"),
+    ],
+)
+def test_roofline_prefill_rejects_invalid_parameters(overrides, message: str) -> None:
+    with pytest.raises(ValueError, match=message):
+        roofline_prefill(**overrides)
 
 
 def test_exact_attention_sum_of_per_session_context_work() -> None:
@@ -71,6 +127,7 @@ def test_empty_compute_batch_has_zero_latency(model) -> None:
 
 def test_models_satisfy_replaceable_protocols() -> None:
     assert isinstance(AggregatePrefillLatencyModel(1.0), PrefillLatencyModel)
+    assert isinstance(roofline_prefill(), PrefillLatencyModel)
     assert isinstance(LinearAttentionLatencyModel(1.0), AttentionLatencyModel)
     assert isinstance(LinearExpertBatchLatencyModel(1.0), ExpertComputeLatencyModel)
 

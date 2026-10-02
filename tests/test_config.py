@@ -307,6 +307,7 @@ def test_examples_comment_every_implemented_discriminator_value() -> None:
     text = "\n".join(path.read_text(encoding="utf-8") for path in EXAMPLE_PATHS)
     expected_values = {
         "aggregate_throughput",
+        "roofline_context",
         "linear_context",
         "linear_expert_batch",
         "startup_min_package",
@@ -331,6 +332,70 @@ def test_examples_comment_every_implemented_discriminator_value() -> None:
     }
     for value in expected_values:
         assert value in text
+
+ROOFLINE_PREFILL = {
+    "model": "roofline_context",
+    "flops_per_second": 5.85e15,
+    "memory_bandwidth_bytes_per_second": 2.4e13,
+    "flops_per_token": 4.178e10,
+    "flops_per_attention_pair": 3.08e6,
+    "fixed_weight_bytes": 1.34e10,
+    "routed_weight_bytes": 4.54e11,
+    "routed_expert_fraction": 0.0625,
+    "context_bytes_per_token": 192512,
+    "bytes_per_prefill_token": 4812800,
+}
+
+
+def test_roofline_context_prefill_loads_and_builds_runtime_model(tmp_path: Path) -> None:
+    from agentic_sim.hardware import Device, RooflineContextPrefillLatencyModel
+
+    hardware, workload, mapping = example_documents()
+    hardware["devices"][0]["capabilities"]["prefill"] = dict(ROOFLINE_PREFILL)
+
+    config = load_documents(tmp_path, hardware, workload, mapping)
+    capability = config.hardware.devices[0].capabilities.prefill
+
+    assert capability is not None
+    assert capability.tokens_per_second is None
+    assert capability.roofline is not None
+    assert capability.roofline.routed_expert_fraction == 0.0625
+    device = Device.from_config(config.hardware.devices[0])
+    assert isinstance(device.prefill_model, RooflineContextPrefillLatencyModel)
+    assert device.prefill_model.context_bytes_per_token == 192512
+
+
+@pytest.mark.parametrize(
+    ("change", "message"),
+    [
+        (lambda prefill: prefill.pop("flops_per_token"), "missing required field.*flops_per_token"),
+        (lambda prefill: prefill.update({"tokens_per_second": 1}), "unknown field.*tokens_per_second"),
+        (lambda prefill: prefill.update({"routed_expert_fraction": 1.5}), "at most 1"),
+        (lambda prefill: prefill.update({"flops_per_second": 0}), "greater than 0"),
+        (lambda prefill: prefill.update({"fixed_weight_bytes": -1}), "at least 0"),
+    ],
+)
+def test_roofline_context_prefill_rejects_invalid_fields(
+    tmp_path: Path,
+    change,
+    message: str,
+) -> None:
+    hardware, workload, mapping = example_documents()
+    prefill = dict(ROOFLINE_PREFILL)
+    change(prefill)
+    hardware["devices"][0]["capabilities"]["prefill"] = prefill
+
+    with pytest.raises(ConfigurationError, match=message):
+        load_documents(tmp_path, hardware, workload, mapping)
+
+
+def test_aggregate_prefill_rejects_roofline_fields(tmp_path: Path) -> None:
+    hardware, workload, mapping = example_documents()
+    hardware["devices"][0]["capabilities"]["prefill"]["flops_per_token"] = 1
+
+    with pytest.raises(ConfigurationError, match="unknown field.*flops_per_token"):
+        load_documents(tmp_path, hardware, workload, mapping)
+
 
 def test_batch_latency_curve_capability_loads_and_builds_runtime_model(
     tmp_path: Path,

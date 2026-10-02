@@ -28,6 +28,11 @@ class EventEngine:
     def pending_events(self) -> int:
         return len(self._queue)
 
+    def pending(self, event_type: EventType) -> tuple[Event, ...]:
+        """Unprocessed events of one type, in dispatch order (e.g. past end_time)."""
+
+        return tuple(sorted(event for event in self._queue if event.event_type is event_type))
+
     def register_handler(self, event_type: EventType, handler: EventHandler) -> None:
         self._handlers[event_type] = handler
 

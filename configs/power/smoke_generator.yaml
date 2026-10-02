@@ -1,0 +1,50 @@
+# Generator input for the power-model smoke config: the PanAgretti paper split of
+# 8 B200-like GPU prefill chips and 56 NMP decode nodes, Qwen3-235B-A22B.
+#   python scripts/generate_config.py --input-yaml configs/power/smoke_generator.yaml --force
+model: qwen3-235b
+
+# Prefill: 8 chips as 2 tensor-parallel groups of 4 (Qwen3-235B FP16 is ~470 GB).
+# Per chip 2.25 PFLOP/s and 8 TB/s (paper), derated 0.65 / 0.75 as in
+# scripts/generate_config_nmp.py.
+prefill_device_flops_per_second: 1.4625e15
+prefill_device_memory_bandwidth_bytes_per_second: 6.0e12
+prefill_devices: 2
+prefill_tp: 4
+prefill_model: roofline_context
+
+# Decode: 56 NMP nodes, attention (DP) and experts (EP) co-located. Paper Table I:
+# 16 PUs x 32 matrix units x 32x32 MACs at 1 GHz; 4 M3D-DRAM dies x 16 TB/s.
+decode_attn_device_flops_per_second: 1.048576e15
+decode_attn_device_memory_bandwidth_bytes_per_second: 6.4e13
+decode_ffn_device_flops_per_second: 1.048576e15
+decode_ffn_device_memory_bandwidth_bytes_per_second: 6.4e13
+dp: 56
+ep: 56
+colocate_attn_ffn: true
+# Projection weights are read once per node step; charge each session 1/B_ref of
+# them. Set B_ref near the mean active sessions on a busy node and check the attn
+# timing ratio in run_summary.json. This light smoke load (~8 active sessions over
+# 56 nodes) almost always has one session per busy node.
+attn_proj_reference_batch: 1
+
+# Reference operating point (TraceLab medians: P ~181 new tokens, C ~107-131K).
+prefill_tokens: 181
+decode_context_tokens: 131072
+
+# 4 x 32 GB node DRAM minus ~21.5 GB of weights (13.4 GB replicated attention +
+# ~8.1 GB of this node's experts).
+attn_kv_capacity_bytes: 1.065e11
+
+# GlassML optical fabric (as the existing glassml configs): 16.4 TB/s, 20 us start.
+ffn_all_to_all_bandwidth_bytes_per_second: 1.64e13
+ffn_all_to_all_start_latency_us: 20
+ffn_all_to_all_min_payload_bytes: 0
+kv_p2p_bandwidth_bytes_per_second: 1.64e13
+kv_p2p_start_latency_us: 20
+kv_pool_bandwidth_bytes_per_second: 6.4e12
+kv_pool_start_latency_us: 20
+
+output_dir: configs/power/smoke
+weight_bytes: 2
+activation_bytes: 2
+kv_bytes: 2

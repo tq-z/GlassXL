@@ -172,3 +172,81 @@ def test_yaml_input_rejects_unknown_keys_and_missing_values(tmp_path) -> None:
         load_input_yaml(unknown_path)
     with pytest.raises(ValueError, match="missing required"):
         merge_input_yaml(build_parser().parse_args([]))
+
+
+GOLDEN_DIRECTORY = __import__("pathlib").Path(__file__).resolve().parent / "data" / "generate_config_golden"
+GOLDEN_CASES = {
+    "kimi-k2_dp2_ep4": ("kimi-k2", 2, 4, False),
+    "glm-4.5_dp2_ep4": ("glm-4.5", 2, 4, False),
+    "qwen3-235b_dp4_ep4_colocated": ("qwen3-235b", 4, 4, True),
+}
+
+
+@pytest.mark.parametrize("case", sorted(GOLDEN_CASES))
+def test_default_flags_are_byte_identical_to_pre_power_model_outputs(tmp_path, case: str) -> None:
+    model, dp, ep, colocated = GOLDEN_CASES[case]
+    args = arguments(tmp_path, model, dp=dp, ep=ep)
+    if colocated:
+        args.colocate_attn_ffn = True
+    documents = build_documents(args)
+    write_documents(tmp_path, documents, force=False)
+    for name in ("hardware.yaml", "mapping.yaml"):
+        assert (tmp_path / name).read_bytes() == (GOLDEN_DIRECTORY / case / name).read_bytes()
+
+
+def test_prefill_devices_tp_groups_and_shifted_decode_ids(tmp_path) -> None:
+    single = arguments(tmp_path, "qwen3-235b", dp=4, ep=4)
+    single.colocate_attn_ffn = True
+    base_hardware, _, _ = build_documents(single)
+    grouped = arguments(tmp_path, "qwen3-235b", dp=4, ep=4)
+    grouped.colocate_attn_ffn = True
+    grouped.prefill_devices = 2
+    grouped.prefill_tp = 4
+    hardware, mapping, report = build_documents(grouped)
+    assert mapping["prefill"]["device_ids"] == [0, 1]
+    assert mapping["decode_attn"]["device_ids"] == [2, 3, 4, 5]
+    assert mapping["decode_ffn"]["device_ids"] == [2, 3, 4, 5]
+    assert sorted(mapping["decode_ffn"]["experts_by_device"]) == [2, 3, 4, 5]
+    base_rate = base_hardware["devices"][0]["capabilities"]["prefill"]["tokens_per_second"]
+    for device in hardware["devices"][:2]:
+        assert math.isclose(device["capabilities"]["prefill"]["tokens_per_second"], 4 * base_rate)
+    assert report["deployment"]["prefill_chips"] == 8
+    assert report["deployment"]["prefill_tp"] == 4
+    chip = report["inputs"]["hardware"]["prefill"]
+    device_hardware = report["deployment"]["prefill_device_hardware"]
+    assert device_hardware["flops_per_second"] == 4 * chip["flops_per_second"]
+    assert device_hardware["memory_bandwidth_bytes_per_second"] == (
+        4 * chip["memory_bandwidth_bytes_per_second"]
+    )
+
+
+def test_roofline_context_prefill_and_amortized_attention_load(tmp_path) -> None:
+    from agentic_sim.hardware import Device, RooflineContextPrefillLatencyModel
+    from roofline_model import HardwareSpec, PrecisionSpec
+    from roofline_model.activity import amortized_attention_rate
+
+    args = arguments(tmp_path, "qwen3-235b", dp=4, ep=4)
+    args.colocate_attn_ffn = True
+    args.prefill_model = "roofline_context"
+    args.prefill_tp = 2
+    args.attn_proj_reference_batch = 8
+    documents = build_documents(args)
+    write_documents(tmp_path, documents, force=False)
+    hardware = load_hardware_config(tmp_path / "hardware.yaml")
+    inputs = documents[2]["inputs"]["hardware"]
+    device = Device.from_config(hardware.devices[0])
+    assert isinstance(device.prefill_model, RooflineContextPrefillLatencyModel)
+    assert device.prefill_model.flops_per_second == 2 * inputs["prefill"]["flops_per_second"]
+    assert device.prefill_model.memory_bandwidth_bytes_per_second == (
+        2 * inputs["prefill"]["memory_bandwidth_bytes_per_second"]
+    )
+    attention = hardware.devices[1].capabilities.decode_attn
+    expected = amortized_attention_rate(
+        "qwen3-235b",
+        HardwareSpec(**inputs["decode_attention"]),
+        PrecisionSpec(),
+        32768,
+        8,
+    )
+    assert attention.context_tokens_per_second == expected
+    assert documents[2]["deployment"]["attn_proj_reference_batch"] == 8

@@ -208,8 +208,15 @@ class KVP2PInterconnect:
         src: Device,
         destinations: Sequence[Device],
         ready_time: float,
+        *,
+        reserve_source: bool = True,
     ) -> InterconnectReservation:
-        """Charge one P2P startup for one logical multi-destination KV batch."""
+        """Charge one P2P startup for one logical multi-destination KV batch.
+
+        ``reserve_source=False`` sends from the source's copy engine instead of
+        occupying its queue, so a source busy with reserved-ahead compute does not
+        push the transfer, and with it the destinations' queues, into the future.
+        """
 
         if not destinations:
             raise ValueError("a KV transfer batch requires at least one destination")
@@ -218,7 +225,7 @@ class KVP2PInterconnect:
             src.device_id,
             destinations[0].device_id,
         )
-        endpoints: list[Device] = [src]
+        endpoints: list[Device] = [src] if reserve_source else []
         seen = {src.device_id}
         for destination in destinations:
             if destination.device_id not in seen:

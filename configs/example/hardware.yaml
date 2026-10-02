@@ -6,7 +6,11 @@ schema_version: 1
 devices:
   - id: 0
     capabilities:
-      # Implemented prefill models: aggregate_throughput.
+      # Implemented prefill models: aggregate_throughput, roofline_context.
+      # roofline_context takes flops_per_second, memory_bandwidth_bytes_per_second,
+      # flops_per_token, flops_per_attention_pair, fixed_weight_bytes,
+      # routed_weight_bytes, routed_expert_fraction, context_bytes_per_token and
+      # bytes_per_prefill_token instead of tokens_per_second (see configuration.md).
       prefill:
         model: aggregate_throughput
         # Aggregate prefill capacity in newly-prefilled tokens/s; must be > 0.

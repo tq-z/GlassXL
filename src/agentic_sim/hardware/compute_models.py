@@ -139,6 +139,93 @@ class AggregatePrefillLatencyModel:
 
 
 @dataclass(frozen=True)
+class RooflineContextPrefillLatencyModel:
+    """Context-aware prefill roofline for one batch.
+
+    With T = sum(P_i):
+        flops = flops_per_token*T + flops_per_attention_pair*sum(P_i*C_i + P_i(P_i+1)/2)
+        bytes = fixed_weight_bytes + routed_weight_bytes*(1 - (1 - f)^T)
+                + context_bytes_per_token*sum_{P_i>0} C_i + bytes_per_prefill_token*T
+        latency = max(flops / flops_per_second, bytes / memory_bandwidth)
+
+    Weights are read once per batch (routed experts by expected coverage under
+    uniform routing) and each session's context KV is read once.
+    """
+
+    flops_per_second: float
+    memory_bandwidth_bytes_per_second: float
+    flops_per_token: float
+    flops_per_attention_pair: float
+    fixed_weight_bytes: float
+    routed_weight_bytes: float
+    routed_expert_fraction: float
+    context_bytes_per_token: float
+    bytes_per_prefill_token: float
+
+    def __post_init__(self) -> None:
+        _positive_rate(self.flops_per_second, "flops_per_second")
+        _positive_rate(
+            self.memory_bandwidth_bytes_per_second,
+            "memory_bandwidth_bytes_per_second",
+        )
+        for field_name in (
+            "flops_per_token",
+            "flops_per_attention_pair",
+            "fixed_weight_bytes",
+            "routed_weight_bytes",
+            "context_bytes_per_token",
+            "bytes_per_prefill_token",
+        ):
+            value = getattr(self, field_name)
+            if isinstance(value, bool) or not isinstance(value, (int, float)):
+                raise ValueError(f"{field_name} must be a finite non-negative number")
+            if not math.isfinite(float(value)) or float(value) < 0.0:
+                raise ValueError(f"{field_name} must be a finite non-negative number")
+        fraction = self.routed_expert_fraction
+        if (
+            isinstance(fraction, bool)
+            or not isinstance(fraction, (int, float))
+            or not 0.0 <= float(fraction) <= 1.0
+        ):
+            raise ValueError("routed_expert_fraction must be within [0, 1]")
+
+    def expert_coverage(self, tokens: int) -> float:
+        if tokens <= 0:
+            return 0.0
+        if self.routed_expert_fraction >= 1.0:
+            return 1.0
+        return -math.expm1(tokens * math.log1p(-self.routed_expert_fraction))
+
+    def latency_s(
+        self,
+        batch: Sequence[PrefillWork],
+        context: StageContext,
+    ) -> float:
+        del context
+        tokens = sum(work.prefill_tokens for work in batch)
+        if tokens == 0:
+            return 0.0
+        pairs = sum(
+            work.prefill_tokens * work.context_tokens
+            + work.prefill_tokens * (work.prefill_tokens + 1) / 2.0
+            for work in batch
+        )
+        flops = self.flops_per_token * tokens + self.flops_per_attention_pair * pairs
+        bytes_moved = (
+            self.fixed_weight_bytes
+            + self.routed_weight_bytes * self.expert_coverage(tokens)
+            + self.context_bytes_per_token * sum(
+                work.context_tokens for work in batch if work.prefill_tokens > 0
+            )
+            + self.bytes_per_prefill_token * tokens
+        )
+        return max(
+            flops / self.flops_per_second,
+            bytes_moved / self.memory_bandwidth_bytes_per_second,
+        )
+
+
+@dataclass(frozen=True)
 class LinearAttentionLatencyModel:
     """V1 attention model: sum(C_i) / context token rate."""
 

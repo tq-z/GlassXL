@@ -29,6 +29,12 @@ from roofline_model import (  # noqa: E402
     resolve_model,
     supported_models,
 )
+from roofline_model.activity import (  # noqa: E402
+    PrefillContextCoefficients,
+    amortized_attention_rate,
+)
+
+PREFILL_MODELS = ("aggregate_throughput", "roofline_context")
 
 OUTPUT_NAMES = ("hardware.yaml", "mapping.yaml", "roofline_report.yaml")
 
@@ -60,6 +66,15 @@ YAML_INPUT_KEYS = {
     "kv_bytes",
     "colocate_attn_ffn",
     "force",
+    "prefill_devices",
+    "prefill_tp",
+    "prefill_model",
+    "attn_proj_reference_batch",
+    "routing_traces",
+    "routing_glob",
+    "skew_samples",
+    "skew_seed",
+    "skew_max_batch",
 }
 
 def _positive_float(value: str) -> float:
@@ -154,6 +169,37 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--kv-bytes", type=_positive_float)
     parser.add_argument("--colocate-attn-ffn", action="store_true", default=None)
     parser.add_argument("--force", action="store_true", default=None)
+    parser.add_argument(
+        "--prefill-devices",
+        type=_positive_int,
+        help="number of prefill devices (default 1); decode ids follow them",
+    )
+    parser.add_argument(
+        "--prefill-tp",
+        type=_positive_int,
+        help="chips per prefill device (default 1); its rates are this multiple of the per-chip prefill rates",
+    )
+    parser.add_argument(
+        "--prefill-model",
+        choices=PREFILL_MODELS,
+        help="simulator prefill model (default aggregate_throughput)",
+    )
+    parser.add_argument(
+        "--attn-proj-reference-batch",
+        type=_positive_int,
+        help="amortize attention projection weights over this many sessions per device step "
+        "(default: charged per session, as the estimator does)",
+    )
+    parser.add_argument(
+        "--routing-traces",
+        type=Path,
+        help="moe_routing directory; replaces balanced FFN curves with skew-aware ones "
+        "measured from real decode routing (needs numpy)",
+    )
+    parser.add_argument("--routing-glob", help="trace files to use (default 235b_*.npy)")
+    parser.add_argument("--skew-samples", type=_positive_int, help="samples per batch size (default 32)")
+    parser.add_argument("--skew-seed", type=int, help="sampling seed (default 0)")
+    parser.add_argument("--skew-max-batch", type=_positive_int, help="largest batch measured (default 4096)")
     parser.add_argument(
         "--input-yaml",
         "--config-yaml",
@@ -261,6 +307,32 @@ def merge_input_yaml(args: argparse.Namespace) -> argparse.Namespace:
     for key in ("colocate_attn_ffn", "force"):
         value = values.get(key)
         values[key] = False if value is None else _yaml_bool(value, key)
+    for key in ("prefill_devices", "prefill_tp"):
+        try:
+            values[key] = _positive_int(str(1 if values.get(key) is None else values[key]))
+        except (TypeError, ValueError) as error:
+            raise ValueError(f"YAML/CLI key {key!r} must be a positive integer") from error
+    if values.get("attn_proj_reference_batch") is not None:
+        try:
+            values["attn_proj_reference_batch"] = _positive_int(
+                str(values["attn_proj_reference_batch"])
+            )
+        except (TypeError, ValueError) as error:
+            raise ValueError(
+                "YAML/CLI key 'attn_proj_reference_batch' must be a positive integer"
+            ) from error
+    prefill_model = values.get("prefill_model") or "aggregate_throughput"
+    if prefill_model not in PREFILL_MODELS:
+        raise ValueError(
+            f"prefill_model must be one of {', '.join(PREFILL_MODELS)}, got {prefill_model!r}"
+        )
+    values["prefill_model"] = prefill_model
+    if values.get("routing_traces") is not None:
+        values["routing_traces"] = Path(values["routing_traces"])
+    values["routing_glob"] = str(values.get("routing_glob") or "235b_*.npy")
+    for key, default in (("skew_samples", 32), ("skew_max_batch", 4096)):
+        values[key] = _positive_int(str(default if values.get(key) is None else values[key]))
+    values["skew_seed"] = int(0 if values.get("skew_seed") is None else values["skew_seed"])
     values["output_dir"] = Path(values["output_dir"])
     values["model"] = str(values["model"])
     return argparse.Namespace(**values)
@@ -424,11 +496,13 @@ def build_documents(
         model, hardware_spec, precision, deployment, operating_point
     )
 
-    attention_ids = list(range(1, 1 + args.dp))
+    prefill_ids = list(range(args.prefill_devices))
+    first_decode_id = args.prefill_devices
+    attention_ids = list(range(first_decode_id, first_decode_id + args.dp))
     ffn_ids = (
         attention_ids.copy()
         if args.colocate_attn_ffn
-        else list(range(1 + args.dp, 1 + args.dp + args.ep))
+        else list(range(first_decode_id + args.dp, first_decode_id + args.dp + args.ep))
     )
     placements = _expert_placements(model.num_experts, ffn_ids)
     curve_by_count = {
@@ -459,26 +533,52 @@ def build_documents(
         / estimate.effective_kv_bytes_per_token
     )
 
-    capabilities: dict[int, dict[str, Any]] = {
-        0: {
-            "prefill": {
-                "model": "aggregate_throughput",
-                "tokens_per_second": estimate.prefill_all_layers.tokens_per_second,
-            }
+    # One prefill device is a tensor-parallel group of prefill_tp chips.
+    prefill_device_hardware = HardwareSpec(
+        args.prefill_tp * args.prefill_device_flops_per_second,
+        args.prefill_tp * args.prefill_device_memory_bandwidth_bytes_per_second,
+    )
+    if args.prefill_model == "roofline_context":
+        prefill_capability = PrefillContextCoefficients.from_model(
+            model, precision
+        ).capability_document(prefill_device_hardware)
+    else:
+        prefill_capability = {
+            "model": "aggregate_throughput",
+            "tokens_per_second": (
+                args.prefill_tp * estimate.prefill_all_layers.tokens_per_second
+            ),
         }
+    if args.attn_proj_reference_batch is None:
+        attention_rate = estimate.decode_attention_all_layers.tokens_per_second
+    else:
+        attention_rate = amortized_attention_rate(
+            model,
+            hardware_spec.decode_attention,
+            precision,
+            args.decode_context_tokens,
+            args.attn_proj_reference_batch,
+        )
+
+    capabilities: dict[int, dict[str, Any]] = {
+        device_id: {"prefill": dict(prefill_capability)} for device_id in prefill_ids
     }
     for device_id in attention_ids:
         capabilities.setdefault(device_id, {})["decode_attn"] = {
             "model": "linear_context",
-            "context_tokens_per_second": (
-                estimate.decode_attention_all_layers.tokens_per_second
-            ),
+            "context_tokens_per_second": attention_rate,
             "kv_capacity_tokens": capacity_tokens,
         }
     for device_id in ffn_ids:
         local_count = len(placements[device_id])
         capabilities.setdefault(device_id, {})["decode_ffn"] = _curve_document(
             curve_by_count[local_count]
+        )
+    skew_report = None
+    if args.routing_traces is not None:
+        skew_report = _apply_skew_aware_curves(
+            args, model, hardware_spec, precision, deployment,
+            placements, curve_by_count, capabilities, ffn_ids,
         )
 
     hardware = {
@@ -516,7 +616,7 @@ def build_documents(
             "top_k": model.top_k,
         },
         "prefill": {
-            "device_ids": [0],
+            "device_ids": prefill_ids,
             "state": "stateful",
             "placement": "sticky_round_robin",
         },
@@ -592,6 +692,20 @@ def build_documents(
             "effective_rates": True,
             "si_units": "decimal",
         },
+        # Read by power_model to map simulator devices to physical chips; the
+        # simulator itself never loads this report.
+        "deployment": {
+            "prefill_device_ids": prefill_ids,
+            "prefill_tp": args.prefill_tp,
+            "prefill_chips": args.prefill_devices * args.prefill_tp,
+            "prefill_model": args.prefill_model,
+            "prefill_device_hardware": asdict(prefill_device_hardware),
+            "decode_attn_device_ids": attention_ids,
+            "decode_ffn_device_ids": ffn_ids,
+            "colocate_attn_ffn": args.colocate_attn_ffn,
+            "attn_proj_reference_batch": args.attn_proj_reference_batch,
+            "decode_attention_context_tokens_per_second": attention_rate,
+        },
         "token_conversions": {
             "routed_activation_bytes_per_token": estimate.routed_activation_bytes,
             "growing_kv_elements_per_model_token": (
@@ -616,8 +730,7 @@ def build_documents(
                 estimate.decode_attention_all_layers
             ),
             "decode_attention_dp_aggregate_context_tokens_per_second": (
-                args.dp
-                * estimate.decode_attention_all_layers.tokens_per_second
+                args.dp * attention_rate
             ),
             "decode_ffn_per_device_curves": {
                 local_count: _curve_report(curve_set.all_layers)
@@ -636,7 +749,89 @@ def build_documents(
             "This is a coarse lower-bound calibration, not a kernel/capacity simulator.",
         ],
     }
+    if args.prefill_model == "roofline_context":
+        report["assumptions"].append(
+            "roofline_context prefill: weights read once per batch (routed experts by expected "
+            "uniform-routing coverage), context KV read once per session; latency = max(compute, memory)."
+        )
+    if args.attn_proj_reference_batch is not None:
+        report["assumptions"].append(
+            f"Decode attention charges each session 1/{args.attn_proj_reference_batch} of the projection "
+            "weights (read once per device step for a batch of that size)."
+        )
+    if skew_report is not None:
+        report["ffn_skew"] = skew_report
+        report["assumptions"].append(
+            "FFN curves are skew-aware and per device: the simulator's equal-routing barrier returns "
+            "the sum over MoE layers of the slowest device's roofline time under real decode routing "
+            "at every batch size (power_model/skew.py)."
+        )
     return hardware, mapping, report
+
+
+def _apply_skew_aware_curves(
+    args: argparse.Namespace,
+    model,
+    hardware_spec: PhaseHardwareSpec,
+    precision: PrecisionSpec,
+    deployment: DeploymentSpec,
+    placements: dict[int, list[int]],
+    curve_by_count: dict[int, FFNCurve],
+    capabilities: dict[int, dict[str, Any]],
+    ffn_ids: list[int],
+) -> dict[str, Any]:
+    from power_model.routing import DecodeRowPool
+    from power_model.skew import (
+        batch_grid,
+        curve_latency,
+        measure_real_ffn_time,
+        skew_aware_device_curves,
+        validation_table,
+    )
+    from roofline_model.activity import moe_layer_count
+
+    pool = DecodeRowPool.load(
+        args.routing_traces,
+        num_layers=moe_layer_count(model),
+        num_experts=model.num_experts,
+        top_k=model.top_k,
+        file_glob=args.routing_glob,
+    )
+    rows = measure_real_ffn_time(
+        pool, placements, model, hardware_spec.decode_ffn, precision, deployment,
+        batches=batch_grid(args.skew_max_batch),
+        samples=args.skew_samples,
+        seed=args.skew_seed,
+    )
+    curves = skew_aware_device_curves(rows, placements, model, hardware_spec.decode_ffn)
+    for device_id in ffn_ids:
+        capabilities[device_id]["decode_ffn"] = {
+            "model": "batch_latency_curve",
+            "points": [
+                {"activation_tokens": int(tokens), "latency_us": seconds * 1_000_000.0}
+                for tokens, seconds in curves[device_id]
+            ],
+        }
+    table = validation_table(
+        rows,
+        placements,
+        model.num_experts,
+        before=lambda device, tokens: _curve_latency(curve_by_count[len(placements[device])], tokens),
+        after=lambda device, tokens: curve_latency(curves[device], tokens),
+    )
+    construction = [abs(row["skew_aware_over_monotone"] - 1.0) for row in table]
+    measured = [abs(row["skew_aware_over_real"] - 1.0) for row in table]
+    return {
+        "routing_traces": str(args.routing_traces),
+        "routing_glob": args.routing_glob,
+        "trace_sessions": len(pool.streams),
+        "decode_rows": pool.total_rows,
+        "samples_per_batch": args.skew_samples,
+        "seed": args.skew_seed,
+        "max_abs_error_vs_monotone_real": max(construction),
+        "max_abs_error_vs_measured_mean": max(measured),
+        "table": table,
+    }
 
 
 def write_documents(

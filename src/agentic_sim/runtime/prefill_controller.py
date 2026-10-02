@@ -111,6 +111,9 @@ class PrefillController:
             if device.prefill_model is None:
                 raise ValueError(f"device {device_id} has no prefill capability")
         self.batcher = PrefillBatcher(mapping.device_ids)
+        # False: KV transfers leave through the prefill device's copy engine and do
+        # not wait behind its reserved-ahead compute (set by the runtime).
+        self.reserve_transfer_source = True
         self._pending_copies: dict[int, PrefillCopyLease] = {}
         self._stateful_sessions: dict[int, SessionState] = {}
 
@@ -138,7 +141,20 @@ class PrefillController:
         return device_id
 
     def process_ready(self, launch_time_s: float) -> tuple[PrefillBatchResult, ...]:
-        """Launch one ready batch per idle prefill device at this timestamp."""
+        """Launch one ready batch per idle prefill device and complete it at once.
+
+        Completion submits attention admissions and books their KV P2P transfers
+        now, with the compute finish as the ready time.
+        """
+
+        return tuple(self.complete_batch(item) for item in self.launch_ready(launch_time_s))
+
+    def launch_ready(self, launch_time_s: float) -> tuple[_ScheduledBatch, ...]:
+        """Reserve pool load and compute for one ready batch per idle prefill device.
+
+        Batches are returned in completion order; pass each to ``complete_batch``
+        when its compute finishes to book transfers on the event clock.
+        """
 
         launch = _time(launch_time_s, "launch_time_s")
         scheduled: list[_ScheduledBatch] = []
@@ -152,14 +168,15 @@ class PrefillController:
             if batch is not None:
                 scheduled.append(self._schedule_batch(batch))
 
-        results = [
-            self._complete_batch(item)
-            for item in sorted(
+        return tuple(
+            sorted(
                 scheduled,
                 key=lambda item: (item.compute.finish_time, item.batch.batch_id),
             )
-        ]
-        return tuple(results)
+        )
+
+    def complete_batch(self, scheduled: _ScheduledBatch) -> PrefillBatchResult:
+        return self._complete_batch(scheduled)
 
     def complete_attention_admissions(
         self,
@@ -192,6 +209,7 @@ class PrefillController:
                 source_id,
                 destination_ids,
                 ready_time,
+                reserve_source=self.reserve_transfer_source,
             )
             for admission in group:
                 lease = self._pending_copies[admission.session_id]

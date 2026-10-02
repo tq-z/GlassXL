@@ -13,6 +13,7 @@ class EventType(Enum):
     PREFILL_LAUNCH = auto()
     DECODE_LAUNCH = auto()
     POOL_WRITE_COMPLETE = auto()
+    PREFILL_COMPLETE = auto()
 
 
 @dataclass(order=True, frozen=True)

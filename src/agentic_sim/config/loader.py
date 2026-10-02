@@ -46,6 +46,7 @@ from .models import (
     PrefillModel,
     PrefillPlacement,
     PrefillState,
+    RooflinePrefillConfig,
     SimulationConfig,
     SyntheticSourceConfig,
     UniformDistributionConfig,
@@ -184,17 +185,53 @@ def _device_ids(value: object, path: str) -> tuple[int, ...]:
     return ids
 
 
+_ROOFLINE_PREFILL_RATES = ("flops_per_second", "memory_bandwidth_bytes_per_second")
+_ROOFLINE_PREFILL_WORK = (
+    "flops_per_token",
+    "flops_per_attention_pair",
+    "fixed_weight_bytes",
+    "routed_weight_bytes",
+    "context_bytes_per_token",
+    "bytes_per_prefill_token",
+)
+
+
 def _parse_prefill_capability(value: object, path: str) -> PrefillCapabilityConfig:
     raw = _mapping(value, path)
-    _fields(raw, path, {"model", "tokens_per_second"})
+    if "model" not in raw:
+        raise ConfigurationError(f"{path}: missing required field(s): model")
+    model = _enum(raw["model"], f"{path}.model", PrefillModel)
+    if model is PrefillModel.AGGREGATE_THROUGHPUT:
+        _fields(raw, path, {"model", "tokens_per_second"})
+        return PrefillCapabilityConfig(
+            model=model,
+            tokens_per_second=_number(
+                raw["tokens_per_second"],
+                f"{path}.tokens_per_second",
+                minimum=0,
+                strict_minimum=True,
+            ),
+        )
+
+    _fields(
+        raw,
+        path,
+        {"model", "routed_expert_fraction", *_ROOFLINE_PREFILL_RATES, *_ROOFLINE_PREFILL_WORK},
+    )
+    values = {
+        name: _number(raw[name], f"{path}.{name}", minimum=0, strict_minimum=True)
+        for name in _ROOFLINE_PREFILL_RATES
+    }
+    values.update(
+        (name, _number(raw[name], f"{path}.{name}", minimum=0))
+        for name in _ROOFLINE_PREFILL_WORK
+    )
+    fraction = _number(raw["routed_expert_fraction"], f"{path}.routed_expert_fraction", minimum=0)
+    if fraction > 1.0:
+        raise ConfigurationError(f"{path}.routed_expert_fraction: must be at most 1")
     return PrefillCapabilityConfig(
-        model=_enum(raw["model"], f"{path}.model", PrefillModel),
-        tokens_per_second=_number(
-            raw["tokens_per_second"],
-            f"{path}.tokens_per_second",
-            minimum=0,
-            strict_minimum=True,
-        ),
+        model=model,
+        roofline=RooflinePrefillConfig(routed_expert_fraction=fraction, **values),
     )
 
 

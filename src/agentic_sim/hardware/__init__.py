@@ -13,6 +13,7 @@ from agentic_sim.hardware.compute_models import (
     P2PLatencyModel,
     PrefillLatencyModel,
     PrefillWork,
+    RooflineContextPrefillLatencyModel,
     StageContext,
 )
 from agentic_sim.hardware.device import Device, DeviceOperation, DeviceReservation
@@ -53,6 +54,7 @@ __all__ = [
     "P2PLatencyModel",
     "PrefillLatencyModel",
     "PrefillWork",
+    "RooflineContextPrefillLatencyModel",
     "StageContext",
     "StartupMinPackageCollectiveModel",
     "StartupThroughputP2PModel",

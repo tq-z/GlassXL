@@ -1,0 +1,27 @@
+# Energy coefficients for PanAgretti NMP decode nodes and B200-like GPU prefill chips.
+#
+# Every coefficient defaults to a preset in power_model/coefficients.py, each with
+# its provenance (paper, perf_sim, or derived). `overrides` replace individual
+# coefficients by name. Values only the hardware owners can supply (static/leakage
+# power, optical-I/O and HBM energy per bit) have no preset value: with
+# allow_placeholders: true a documented placeholder is used instead and listed in
+# every output (run_summary.json, power.npz meta). Set it to false once real values
+# are supplied.
+schema_version: 1
+model: qwen3-235b
+# precision defaults to roofline_report.yaml inputs.precision.
+# prefill_chips_per_device defaults to roofline_report.yaml deployment.prefill_tp.
+device_kinds: {}          # optional {device_id: gpu|nmp} for mixed configs
+gpu:
+  preset: b200_like
+  overrides: {}           # e.g. {p_xpu_static_w: 180, e_hbm_pj_per_bit: 3.9}
+nmp:
+  preset: panagretti_nmp
+  overrides: {}           # e.g. {p_logic_static_w: 30, e_mac_gemm_pj: 0.65}
+kv_pool:
+  preset: off_panel
+  overrides: {}
+trace:
+  dt_s: 0.01              # 10 ms bins; energy is averaged within each bin
+  warmup_s: 0.0           # excluded from summary statistics only
+allow_placeholders: true

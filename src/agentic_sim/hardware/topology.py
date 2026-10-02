@@ -72,12 +72,15 @@ class Topology:
         src_id: int,
         dst_ids: tuple[int, ...],
         ready_time: float,
+        *,
+        reserve_source: bool = True,
     ) -> InterconnectReservation:
         return self.kv_p2p.submit_batch(
             tokens,
             self.get_device(src_id),
             tuple(self.get_device(device_id) for device_id in dst_ids),
             ready_time,
+            reserve_source=reserve_source,
         )
 
     def submit_pool_load(
